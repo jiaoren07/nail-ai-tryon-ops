@@ -1,0 +1,39 @@
+# Secrets
+.env
+.env.local
+.env.*.local
+
+# Python virtual env & bytecode
+backend/.venv/
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# Node modules & build artifacts
+node_modules/
+frontend/dist/
+frontend/.vite/
+
+# 已废弃的 Next.js 视觉原型，仅作磁盘参考，不进产品仓库
+Meijia/
+
+# SQLite database files
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+
+# Runtime-generated static files (not committed; recreated at runtime)
+backend/static/cache/
+backend/static/uploads/
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Claude Code local tooling (skills 走全局 ~/.claude/，项目本地是冗余副本)
+.claude/
