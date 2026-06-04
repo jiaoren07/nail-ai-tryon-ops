@@ -540,69 +540,94 @@
 
 ---
 
-## Phase 5 · 用户端前端（6 步）
+## Phase 5 · 用户端前端（8 步）
 
 ### Step 5.1 · 路由骨架 + 全局 Context
 
 **目标**：搭出路由表，建立 React Context 管理用户全局状态。
 
 **指令**：
-- 按 [design-docu.md §11.2](design-docu.md) 的路径表配置 React Router 路由（U0–U6 与 O1–O7 路径全部声明，页面用占位组件先填空）。
+- 按 [design-docu.md §11.2](design-docu.md) 的路径表配置 React Router 路由（**L0 + U0–U6 + O1–O7** 路径全部声明，页面用占位组件先填空；其中 `/` = L0、`/gender` = U0、`/upload` = U1，注意与旧版的差别）。
 - 创建一个 `UserContext`：管理 `userId`、`userGender`、`handFeatures`、`compareSelection`、`photoId` 五个字段。
 - **`userId` 与 `userGender` 持久化到 `sessionStorage`**：进入应用时若 `userId` 不存在则生成 UUID v4 写入，刷新页面不丢失。
 - 提供一个 axios 实例：自动给所有请求带 `X-User-Id` header；统一拦截响应、`code != 0` 时弹 antd `message.error`。
 
 **验证**：
-- 浏览器手动访问每个声明的路径（共约 13 个），都能渲染出占位页面（不报 404）。
-- 首次访问 `/upload` 后 sessionStorage 中 `userId` 自动出现且为合法 UUID。
+- 浏览器手动访问每个声明的路径（共约 15 个：L0=1、U=7、O=7），都能渲染出占位页面（不报 404）。
+- 首次访问 `/` 后 sessionStorage 中 `userId` 自动出现且为合法 UUID（L0 写入）。
 - 在 `/gender` 占位页里临时调一次 `setUserGender("male")` → 刷新页面后从 `sessionStorage` 仍能读到 `male`。
 - 用 axios 调用一个故意不存在的接口，能在右上角看到 antd 错误提示。
 - 浏览器 DevTools 看任意 API 请求的 header 必带 `X-User-Id` 字段。
 
 ---
 
-### Step 5.2 · U0 手图入口页
+### Step 5.2 · L0 双端入口（Landing）
 
-**目标**：完成 [design-docu.md §6.1](design-docu.md) 描述的入口页。
+**目标**：完成 [design-docu.md §6.0](design-docu.md) 描述的双端分流页。
 
 **指令**：
-- 路由 `/upload`；`/` 默认重定向至此页。
+- 路由 `/`。**不再**重定向到任何用户端深层路径，L0 本身是一个完整页面。
+- 页面布局（按原型 Board 0）：
+  - 顶部：品牌徽章（黄色圆形章 "美甲 / AI 试戴让你更懂"）+ 一句话定位副标题
+  - 主体：左右并排两张大卡片
+    - 左卡 **用户端 · AI 试戴美甲**：卡内一张代表性手部+款式图 + 黄色 CTA 按钮"进入用户端" → 点击跳转 `/gender`
+    - 右卡 **运营端 · 智能运营助手**：卡内一张运营仪表盘示意图（先用 placeholder 占位也可）+ 黄色 CTA 按钮"进入运营端" → 点击跳转 `/ops/overview`
+- **session 处理**：进入本页时若 `sessionStorage.userId` 不存在则生成 UUID v4 写入；运营端入口不强制 userId 但顺手写入无妨
+- 视觉：白底大圆角、`bg-brand` CTA 按钮、Tailwind 实现；不挂运营端 Menu、不挂用户端 Banner，独立 Layout
+
+**验证**：
+- 浏览器访问 `/` 看到 L0 页面（两张大卡片并排，不是上传页/性别页）。
+- 点击"用户端"卡片 → URL 变为 `/gender`。
+- 点击"运营端"卡片 → URL 变为 `/ops/overview`。
+- 首次访问 `/` 后 sessionStorage 中 `userId` 自动出现且为合法 UUID。
+- 刷新 `/` 页面，sessionStorage 的 userId 保持不变。
+
+---
+
+### Step 5.3 · U0 性别选择页
+
+**目标**：完成 [design-docu.md §6.1](design-docu.md) 描述的性别选择页（用户端第一步）。
+
+**指令**：
+- 路由 `/gender`。
+- **无前置守卫**：从 L0 跳转过来或直接访问都允许进入（仅 sessionStorage 兜底：若 `userId` 不存在则本地生成 UUID v4 写入）。
+- 页面布局：顶部标题"先选择你想看的款式方向"，下方两张并排卡片（左"女性"右"男性"），底部小字说明、右上角"跳过"按钮。
+- 两张卡片用 Tailwind 实现 hover 放大动效；卡片内放代表性款式图（女性卡用 `f_01_enh.png`，男性卡用 `m_01.jpg`，Step 1.2 seed 后图都已就绪）。
+- 点击卡片：把 `userGender` 写入 Context + `sessionStorage`，跳转 `/upload`。
+- 点击"跳过"：等同点击"女性"。
+
+**验证**：
+- 直接访问 `/gender` 能正常打开（无重定向），看到两张卡片并排显示，hover 时有放大效果。
+- 点击"女性"后 URL 变为 `/upload`，sessionStorage 中 `userGender=female`。
+- 点击"跳过"等同点击"女性"。
+- 点击"男性"后 URL 变为 `/upload`，sessionStorage 中 `userGender=male`。
+
+---
+
+### Step 5.4 · U1 手图上传页
+
+**目标**：完成 [design-docu.md §6.2](design-docu.md) 描述的手图上传页。
+
+**指令**：
+- 路由 `/upload`。
+- **前置守卫**：进入页面时检查 sessionStorage 中 `userGender` 是否存在，不存在则重定向回 `/gender`。
 - 页面布局：顶部 Banner（"AI 帮你看，哪款美甲适合你的手"），中部上传区域（antd `<Upload.Dragger />`），下方 3–4 张示例图缩略图。
 - 示例图：前端通过后端 URL 访问 `http://localhost:8000/static/samples/01.png` ~ `04.png`，这 4 张在 Step 1.2 已由 seed 脚本复制到 `backend/static/samples/`，**男女用户共用同一组示例**。
 - 上传组件：限制 jpg/png ≤10MB，前端调用 `browser-image-compression` 压到 ≤5MB 再传。
-- 上传成功后调用 `POST /api/user/upload`，把 `photoId` 与 `handFeatures` 写入 Context，跳转 `/gender`。
+- 上传成功后调用 `POST /api/user/upload`，把 `photoId` 与 `handFeatures` 写入 Context，跳转 `/recommend`。
 - 点击示例图也走同一流程（先 fetch 该示例图为 blob，再走上传接口）。
 - 异常文案严格按 [design-docu.md §4.2.5](design-docu.md)（格式不支持、文件超大、网络异常）。
 
 **验证**：
-- 首次访问 `/`，被重定向到 `/upload`。
-- 拖拽一张本地手图上传 → 显示 loading → 跳转到 `/gender`，Context 中 `photoId` 与 `handFeatures.skin_tone` 已填。
-- 点击任一示例图 → 同样进入 `/gender`。
+- 未先选性别直接访问 `/upload` → 被重定向回 `/gender`。
+- 从 `/gender` 选完跳到 `/upload`，能看到上传 UI。
+- 拖拽一张本地手图上传 → 显示 loading → 跳转到 `/recommend`，Context 中 `photoId` 与 `handFeatures.skin_tone` 已填。
+- 点击任一示例图 → 同样进入 `/recommend`。
 - 拖拽一个 `.txt` 文件 → 显示错误文案"格式不支持"，**不**跳转。
 
 ---
 
-### Step 5.3 · U1 性别选择页
-
-**目标**：完成 [design-docu.md §6.2](design-docu.md)。
-
-**指令**：
-- 路由 `/gender`。
-- **前置守卫**：进入页面时检查 Context 中 `photoId` 是否存在，不存在则重定向回 `/upload`。
-- 页面布局：顶部标题"再告诉我们一些信息"，下方两张并排卡片（左"女性"右"男性"），底部小字说明、右上角"跳过"按钮。
-- 两张卡片用 Tailwind 实现 hover 放大动效；卡片内放代表性款式图（女性卡用 `f_01_enh.png`，男性卡用一张男款代表图，等 Step 1.2 男款 seed 后用 `m_01.png`）。
-- 点击卡片：把 `gender` 写入 Context + `sessionStorage`，跳转 `/recommend`。
-- 点击"跳过"：等同点击"女性"。
-
-**验证**：
-- 未先经过上传时直接访问 `/gender`，应被重定向回 `/upload`。
-- 完成上传后跳到 `/gender`，看到两张卡片并排显示，hover 时有放大效果。
-- 点击"女性"后 URL 变为 `/recommend`，sessionStorage 中 `userGender=female`。
-- 重置 sessionStorage 的 `userGender` 字段后刷新 `/recommend`，应被重定向回 `/gender`（即未选性别时无法进入推荐）。
-
----
-
-### Step 5.4 · U2 智能推荐页
+### Step 5.5 · U2 智能推荐页
 
 **目标**：完成 [design-docu.md §4.3](design-docu.md)。
 
@@ -621,7 +646,7 @@
 
 ---
 
-### Step 5.5 · U3 款式浏览页
+### Step 5.6 · U3 款式浏览页
 
 **目标**：完成 [design-docu.md §4.4](design-docu.md)。
 
@@ -640,7 +665,7 @@
 
 ---
 
-### Step 5.6 · U4 多款对比试戴页
+### Step 5.7 · U4 多款对比试戴页
 
 **目标**：完成 [design-docu.md §4.5](design-docu.md)。
 
@@ -658,7 +683,7 @@
 
 ---
 
-### Step 5.7 · U5 结果展示页
+### Step 5.8 · U5 结果展示页
 
 **目标**：完成 [design-docu.md §4.6](design-docu.md)。
 
@@ -773,7 +798,7 @@
 **目标**：建立运营端共享的 Layout（左侧菜单 + 顶部含铃铛 + 主体）。
 
 **指令**：
-- 在 `/ops/*` 路径下使用统一 Layout：左侧 antd Menu（包含 O1 总览、O2 爆款、O3 冷门、O5 AI 助手悬浮、O6 款式管理、O7 报告中心 6 个菜单项）。
+- 在 `/ops/*` 路径下使用统一 Layout：左侧 antd Menu（包含 O1 总览、O2 爆款、O3 冷门、O5 AI 助手悬浮、O6 款式管理、O7 设置中心 6 个菜单项）。
 - 顶部右侧放铃铛组件（先用静态红点占位，Step 9.5 接真实数据）。
 - 切换菜单时主体路由跳转。
 
@@ -905,7 +930,10 @@
 
 ---
 
-## Phase 9 · 报告中心（5 步）
+## Phase 9 · 报告通知子系统 + O7 设置中心（5 步）
+
+> Phase 9 包含两个层次：①**后端**报告/通知/调度/邮件子系统（Step 9.1~9.3，保留原 O7 报告中心的全部后端实现）；②**前端** O7 设置中心 + 铃铛通知（Step 9.4~9.5，把原"独立报告中心页面"重构为"设置中心 → 通知与邮件订阅 tab"）。
+
 
 ### Step 9.1 · 报告与通知的服务函数
 
@@ -943,9 +971,9 @@
 
 ---
 
-### Step 9.3 · 报告中心后端接口
+### Step 9.3 · 报告/通知后端接口
 
-**目标**：实现 [design-docu.md §5.3](design-docu.md) 报告 + 通知相关的全部接口。
+**目标**：实现 [design-docu.md §5.3](design-docu.md) 报告 + 通知相关的全部接口（URL 路径保留原 `/api/ops/reports` 等，仅前端入口在 Step 9.4 改为设置中心 tab）。
 
 **指令**：
 - 实现 `GET /api/ops/reports`：支持 `type`、`start_date`、`end_date`、`page`、`size` 查询参数，按 `period_end DESC` 倒序，分页响应。
@@ -965,22 +993,25 @@
 
 ---
 
-### Step 9.4 · O7 前端：报告中心列表 + 详情
+### Step 9.4 · O7 设置中心前端（含「通知与邮件订阅」tab + 报告详情）
 
-**目标**：完成 [design-docu.md §7.7.6](design-docu.md)。
+**目标**：完成 [design-docu.md §7.7](design-docu.md) 描述的 O7 设置中心 4 tab 框架 + 把原"报告中心独立页面"收编为「通知与邮件订阅」tab。
 
 **指令**：
-- 路由 `/ops/reports`：顶部 antd Radio.Group 类型筛选（全部/日报/周报）+ DatePicker.RangePicker 日期筛选 + 右上角两个按钮「立即生成日报」「立即生成周报」。
-- 表格列：标题、类型、日期范围、生成时间、邮件状态（带图标），点击行跳转 `/ops/reports/:id`。
-- 路由 `/ops/reports/:id`：左侧 react-markdown 渲染 `content_md`，右侧元信息卡（生成方式、邮件状态、错误信息、若失败显示「重新发送」按钮）。
-- 筛选变化时调接口刷新；筛选条件写入 URL query 便于分享。
+- 路由 `/ops/setting`：antd `<Tabs>` 4 项（账号工作台 / 通知与邮件订阅 / AI 助手偏好 / 显示与界面）。Phase 0 仅做「通知与邮件订阅」tab 的实质内容，其余 3 个 tab 用空 `<div>` + 占位文案。
+- **「通知与邮件订阅」tab 布局**（详见 [design-docu.md §7.7.6](design-docu.md)）：
+  - 上半区：邮件订阅开关 + 收件邮箱输入框 + 订阅频率多选（日报/周报/关键事件）+ 「保存」按钮（写 localStorage）。
+  - 下半区：标题"最近 10 份报告" + 右侧两个按钮「立即生成日报」「立即生成周报」+ antd `<Table>` 展示最近 10 条（列：标题、类型、生成时间、邮件状态）+ 「查看更多」链接。
+  - 数据从 `GET /api/ops/reports?limit=10` 拉，每次进入 tab 刷新一次。
+- 路由 `/ops/reports/:id`：详情页保留——左侧 react-markdown 渲染 `content_md`，右侧元信息卡（生成方式、邮件状态、错误信息、若失败显示「重新发送」按钮）。**仅从铃铛通知或设置中心列表行点击进入，无独立列表页路由**。
+- 「立即生成日报/周报」按钮触发 `POST /api/ops/reports/generate?type=daily|weekly`。
 
 **验证**：
-- 打开 `/ops/reports`，能看到至少 1 条记录（来自 Step 9.3 触发的那条）。
+- 打开 `/ops/setting`，默认 tab 落在「通知与邮件订阅」（或可调），4 个 tab 都能切换不报错。
+- 「通知与邮件订阅」tab 的下半区能看到至少 1 条历史报告（来自 Step 9.3 触发的那条）。
 - 点击「立即生成周报」→ 10 秒内列表新增 1 条周报。
-- 类型筛选切换到「仅日报」→ 列表只显示日报。
-- 日期范围筛选缩到今天 → 只显示今天生成的。
-- 点击行 → 详情页 markdown 正常渲染、元信息卡显示状态。
+- 点击列表任一行 → URL 变为 `/ops/reports/:id`，markdown 正常渲染、元信息卡显示状态。
+- 直接访问 `/ops/reports`（旧路径）→ 应被路由配置回退到 404 或重定向到 `/ops/setting`（明示"独立报告中心已下线"）。
 
 ---
 
@@ -1042,7 +1073,7 @@
 **目标**：从触发到收信全链路无遗漏。
 
 **指令**：
-- 在运营端报告中心点击「立即生成日报」。
+- 在 O7 设置中心 →「通知与邮件订阅」tab 点击「立即生成日报」。
 - 同时打开邮箱、铃铛、报告列表三个面板。
 
 **验证**：
@@ -1060,7 +1091,7 @@
 **指令**：
 - 浏览器无痕模式打开 `/`（应被重定向到 `/upload`）。
 - 依次完成：上传 → 选男 → 推荐 → 看到 9 款 → 加入对比 3 款 → 对比试戴 → 选定 1 款 → 收藏。
-- 切换到运营端：O1 看板 → O2 爆款 → 点开某爆款 → 「采纳建议」→ O7 报告中心 → 「立即生成日报」→ 等铃铛 → 点开通知 → 看到报告详情。
+- 切换到运营端：O1 看板 → O2 爆款 → 点开某爆款 → 「采纳建议」→ O7 设置中心 →「通知与邮件订阅」tab →「立即生成日报」→ 等铃铛 → 点开通知 → 看到报告详情。
 - 用 AI 助手对话 3 轮：查 TopN、对比两款、把某款加入首页推荐。
 
 **验证**：

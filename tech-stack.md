@@ -59,10 +59,12 @@
 
 | 用在哪 | 用 antd | 用 tailwind |
 |---|---|---|
-| 用户端（U0–U6） | 少量基础组件（Upload、Modal） | 大部分定制 UI 用 tw 写 |
-| 运营端（O1–O6） | 表格、抽屉、卡片、Statistic | 仅做布局微调 |
+| L0 双端入口 + 用户端（U0–U6） | 少量基础组件（Upload、Modal） | 大部分定制 UI 用 tw 写 |
+| 运营端（O1–O7） | 表格、抽屉、卡片、Statistic、Tabs | 仅做布局微调 |
 
 **理由**：运营端需要复杂表格、筛选器、抽屉，自己写 ROI 极低；用户端 UI 视觉化强，antd 默认样式不够灵活，用 tw 自由发挥。
+
+**颜色统一**：两端共用同一套品牌色板（§2.5），用户端通过 Tailwind class 引用、运营端通过 antd ConfigProvider token 引用；同一份十六进制只在 §2.5 一处声明。
 
 ### 2.3 状态管理：不用 Redux/Zustand
 
@@ -97,6 +99,75 @@
   }
 }
 ```
+
+### 2.5 品牌色板与设计变量
+
+> Single source of truth：所有颜色定义集中在此处。`frontend/tailwind.config.js`（用户端）与 antd `ConfigProvider` token（运营端）都从这里 derive，不在其他文档或代码里另定 hex。
+
+**核心记忆点**（5 色 = 一眼能记住的品牌印象）：
+
+| 用途 | Hex | 备注 |
+|---|---|---|
+| Primary Yellow | `#FFD100` | 品牌主色，CTA 按钮、徽章、高亮 |
+| Primary Text | `#111111` | 主文案（不是纯黑色 #000） |
+| Page Background | `#FAF8F2` | 页面底色（米白，不是纯白） |
+| Card Background | `#FFFFFF` | 卡片浮起色，在米白底上凸出 |
+| AI Purple | `#7C5CFF` | AI 相关元素的辨识色（AI 头像、对话气泡、AI 标识徽章） |
+
+**完整色板**：
+
+| 类别 | Token | Hex |
+|---|---|---|
+| Brand | brand / brand.hover / brand.light | `#FFD100` / `#F6C400` / `#FFF3C4` |
+| Surface | page / card / surface | `#FAF8F2` / `#FFFFFF` / `#F6F7F9` |
+| Text | ink (DEFAULT) / ink.secondary / ink.muted | `#111111` / `#555555` / `#8A8A8A` |
+| Line | line (border) | `#E6E6E6` |
+| AI | ai.purple / ai.blue / ai.wash | `#7C5CFF` / `#28A8FF` / `#F4F0FF` |
+| Semantic | success / warning / danger / info | `#16A34A` / `#F97316` / `#EF4444` / `#3B82F6` |
+
+**Tailwind config（用户端 + L0 入口）**：
+
+```js
+// frontend/tailwind.config.js
+theme: { extend: { colors: {
+  brand: { DEFAULT:'#FFD100', hover:'#F6C400', light:'#FFF3C4' },
+  page: '#FAF8F2', card: '#FFFFFF', surface: '#F6F7F9',
+  ink:  { DEFAULT:'#111111', secondary:'#555555', muted:'#8A8A8A' },
+  line: '#E6E6E6',
+  ai:   { purple:'#7C5CFF', blue:'#28A8FF', wash:'#F4F0FF' },
+  success:'#16A34A', warning:'#F97316', danger:'#EF4444', info:'#3B82F6',
+}}}
+```
+
+**antd ConfigProvider token（运营端）**：
+
+```jsx
+<ConfigProvider theme={{
+  token: {
+    colorPrimary:      '#FFD100',
+    colorPrimaryHover: '#F6C400',
+    colorBgBase:       '#FAF8F2',
+    colorBgContainer:  '#FFFFFF',
+    colorBgLayout:     '#F6F7F9',
+    colorText:         '#111111',
+    colorTextSecondary:'#555555',
+    colorTextTertiary: '#8A8A8A',
+    colorBorder:       '#E6E6E6',
+    colorSuccess:      '#16A34A',
+    colorWarning:      '#F97316',
+    colorError:        '#EF4444',
+    colorInfo:         '#3B82F6',
+  },
+}}>
+```
+
+AI 紫不是 antd 标准 token——在 `frontend/src/index.css` 全局 `:root` 加 CSS var：`--ai-purple: #7C5CFF; --ai-wash: #F4F0FF;`，运营端组件需要时通过 `style={{ color: 'var(--ai-purple)' }}` 引用。
+
+**统一规则**：
+- 用户端组件颜色一律走 Tailwind class（`bg-brand`、`text-ink`、`border-line`）；不写裸 hex
+- 运营端组件优先用 antd token；需要 AI 紫时通过 CSS var 引用
+- 禁止在组件文件里 hard-code 颜色值——新颜色需求一律先回到 §2.5 加 token，再在两端配置文件里同步
+- 设计稿如出现本表外的颜色，先停下来核对，不要默默引入
 
 ---
 
@@ -367,7 +438,7 @@ LLM 返回: "已将 3 款爆款提至首页推荐位顶部，新的排序已生�
 ### 6.4 日报 / 周报：定时生成 + 邮件 + 站内信
 
 日报/周报由 **APScheduler 定时触发**，生成后同时：
-1. 写入 `reports` 表（产品内"报告中心"可查看历史）
+1. 写入 `reports` 表（产品内 O7 设置中心的「通知与邮件订阅」tab 可查看历史，详见 [design-docu.md §7.7.6](design-docu.md)）
 2. 写入 `notifications` 表（前端铃铛红点提醒）
 3. 通过 SMTP 发送 HTML 邮件到指定运营邮箱
 
@@ -424,10 +495,9 @@ POST /api/ops/reports/generate?type=daily   # 立即执行一次
 POST /api/ops/reports/generate?type=weekly
 ```
 
-UI 在"报告中心"右上角放两个按钮：「立即生成日报」「立即生成周报」。点击后走的是和定时任务**完全相同的代码路径**——生成 → 入库 → 站内信 → 邮件，只是 `trigger_source` 字段标记为 `"manual"`。
+UI 在 O7 设置中心 →「通知与邮件订阅」tab 下半区放两个按钮：「立即生成日报」「立即生成周报」。点击后走的是和定时任务**完全相同的代码路径**——生成 → 入库 → 站内信 → 邮件，只是 `trigger_source` 字段标记为 `"manual"`。
 
-演示话术：
-> "这是真实的定时任务，每天 9 点自动跑。现在我用调试按钮提前触发，大家可以看到——5 秒后右上角铃铛会出现红点，同时邮箱也会收到一封 HTML 邮件。"
+> 这条手动触发链路的存在是为了让"定时器跑出来的内容"可以被实时验证：日报/周报实际是定时任务在 09:00 自动跑的，开发与排错时不可能等到第二天 9 点，所以提供一个走相同代码路径的手动入口。
 
 ### 6.5 邮件发送实现
 
@@ -576,7 +646,7 @@ SCHEDULER_ENABLED=true
 | 时间 | 后端 | 前端 |
 |---|---|---|
 | D1 上午 | 项目骨架 + 数据库表 + seed 脚本 | 项目骨架 + 路由 + UI 库接入 |
-| D1 下午 | 用户端基础接口（styles、recommend、tryon） | U0 / U1 页面 |
+| D1 下午 | 用户端基础接口（styles、recommend、tryon） | L0 双端入口 + U0 性别 + U1 上传页面 |
 | D2 | AI 服务接入（即梦 + 通义） | U2 智能推荐页（核心差异化） |
 | D3 | 运营端接口（overview、trending、cold） | U4 多款对比试戴（核心差异化） |
 | D4 | AI 日报 + Function Calling 助手 | 运营端 O1–O4 看板 |
