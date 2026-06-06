@@ -198,3 +198,32 @@ tech-stack.md §1 已同步为实际版本。React 19 / Vite 8 / TS 6 已稳定 
 - 如果设计需要迭代（出现 `原型2/`），按相同 `Board_NN_*` 规则命名；不要混到 `原型1/` 里。
 
 ---
+
+### ✅ Step 0.5 · 后端统一配置加载与启动健康检查 — 2026-06-06
+
+**做了什么：**
+- 新建 3 个文件：
+  - `backend/app/__init__.py`（空，让 `app/` 成为 Python 包）
+  - `backend/app/config.py`：`pydantic-settings` 的 `Settings` 类，14 个字段与 `.env` 一一对应，含 `case_sensitive=True` 和 `extra="ignore"`；模块底部直接 `settings = Settings()` 单例。
+  - `backend/app/main.py`：FastAPI 应用 `app = FastAPI(title="Nail Demo API", version="0.1.0")` + `CORSMiddleware`（allow_origins=`["http://localhost:5173"]`）+ `GET /api/health` 路由，返回 `{code:0, msg:"ok", data:{service:"nail-demo", env:{IMAGE_PROVIDER, SCHEDULER_ENABLED}}}`。
+- **未做**（避免提前优化）：health 路由没声明 `response_model`，Swagger Example Value 显示为通用 `{"additionalProp1":{}}` 占位；实际响应正常。统一响应包装留到 Step 2.2 做。
+
+**验证结果：**
+1. `python -c "from app.main import app, settings; ..."` import 成功，settings 正确加载 `.env`（IMAGE_PROVIDER=mock、SCHEDULER_ENABLED=true）；`app.routes` 含 `/api/health`。
+2. `uvicorn app.main:app --port 8000` 启动，curl `/api/health` → HTTP 200，body 完全符合 Step 0.5 规格：`{"code":0,"msg":"ok","data":{"service":"nail-demo","env":{"IMAGE_PROVIDER":"mock","SCHEDULER_ENABLED":true}}}`。
+3. curl 带 `Origin: http://localhost:5173` 的 OPTIONS 预检 → 返回 `Access-Control-Allow-Origin: http://localhost:5173`，CORS 配置生效。
+4. 用户浏览器访问 `/docs` → Swagger UI 渲染正常，能看到 `GET /api/health`。
+
+**Swagger UI 一次性空白事件（已解决，记录为参考）：**
+- 第一次浏览器打开 `/docs` 是空白页面（HTML 框架返回了，但 Swagger UI 资源没渲染）。沙箱测 `cdn.jsdelivr.net/npm/swagger-ui-dist@5/...` 可达（HTTP 200）、`/openapi.json` 正常。**用户新开窗口重访即恢复**，判定为 jsdelivr CDN 一次性网络抖动，非代码 bug。
+- 风险点：jsdelivr 在国内不稳是已知问题。如果后续频繁踩坑，再考虑换 `cdn.staticfile.org`（七牛云）或自托管 swagger-ui 静态文件到 `backend/static/swagger/`。**Step 0.5 不预先处理**。
+
+**给后续开发者的提示：**
+- **启动后端**：`cd d:\github仓库1\backend && .\.venv\Scripts\Activate.ps1 && uvicorn app.main:app --reload --port 8000`。`--reload` 仅开发用，生产去掉。
+- **配置访问**：在路由/服务里 `from app.config import settings` 直接拿单例，不要每次 `Settings()`（每次重新 parse `.env` 浪费）。
+- **新增 .env 字段**：必须三处同步——`backend/.env`、`backend/.env.example`、`backend/app/config.py` 的 `Settings` 类。任何一处漏，下次启动可能崩或字段读不到。
+- **`extra="ignore"`** 让多余字段不报错——如果用户 `.env` 里有 `OPENAI_API_KEY` 之类历史字段，pydantic 不会因此拒绝启动；但**也不会被读取**，要用必须先在 `Settings` 加字段。
+- **`/docs` 空白时的快速判定**：F12 → Network 看 `swagger-ui-bundle.js` 状态码。200 = 资源拉到了去看 Console JS 错误；failed/pending = CDN 网络问题。
+- Step 1.1 用 SQLAlchemy 模型，导入连接字符串走 `settings.DATABASE_URL`（aiosqlite URL，相对 backend/ 目录的 `nail_demo.db`）。
+
+---
