@@ -227,3 +227,40 @@ tech-stack.md §1 已同步为实际版本。React 19 / Vite 8 / TS 6 已稳定 
 - Step 1.1 用 SQLAlchemy 模型，导入连接字符串走 `settings.DATABASE_URL`（aiosqlite URL，相对 backend/ 目录的 `nail_demo.db`）。
 
 ---
+
+### ✅ Step 1.1 · 定义 6 张表的 SQLAlchemy 模型 — 2026-06-06
+
+**做了什么：**
+- 新建 `backend/app/models/__init__.py`（121 行）：`Base` (DeclarativeBase) + 6 个 ORM 模型 `Style` / `Tryon` / `StyleStats` / `OpsAction` / `Report` / `Notification`。字段名、类型、可空、默认值严格对照 design-docu §4.2。
+- 新建 `backend/app/db.py`（12 行）：用 `settings.DATABASE_URL` 创建 `engine = create_async_engine(...)`，提供 `async def init_db()`，调用 `Base.metadata.create_all` 建所有表（已存在则跳过）。
+- 5 个索引按 §4.3 声明在各模型的 `__table_args__` 里：`ix_tryons_style_created` / `ix_tryons_user_created` / `ix_style_stats_date_tryons` / `ix_reports_type_end` / `ix_notifications_unread_recent`。
+- `style_stats` 表加 `UniqueConstraint(style_id, stat_date, name="uq_style_stats_style_date")`——SQLAlchemy 自动落为唯一索引。
+
+**Step 1.1 验证（全部 PASS）：**
+1. `await init_db()` 跑一次 → `backend/nail_demo.db` 被创建（56 KB）。
+2. `sqlite_master` 查 6 张表：`notifications/ops_actions/reports/style_stats/styles/tryons` 全部出现，字段数依次为 8/6/11/7/13/9，与 design-docu 完全一致。
+3. `sqlite_master` 查显式索引：5 条全部出现（即 §4.3 列出的 5 条；UNIQUE 索引 + FK 自动索引不计入这 5 条）。
+4. 再跑一次 `await init_db()` 无报错、无重复建表（`create_all` 自带 IF NOT EXISTS）。✅ 幂等。
+
+**设计偏离 / 选择（与 docu 对齐但有理由）：**
+
+| 项 | 选择 | 原因 |
+|---|---|---|
+| `is_active` / `is_collected` / `is_read` | `Integer` 0/1 | docu §4.2 标 "INT"，0/1 语义在 seed 脚本里更直观；SQLite 反正都是 INT 存 |
+| `DateTime` 默认值（app 层） | `default=_utcnow`（Python 函数） | docu §4 时区约定要求 UTC；seed 脚本会显式覆盖 |
+| `DateTime` 默认值（docu 明示 `CURRENT_TIMESTAMP`） | `server_default=func.current_timestamp()` | `reports.generated_at` + `notifications.created_at` 走 SQL 层默认（SQLite 的 CURRENT_TIMESTAMP 是 UTC，符合时区约定） |
+| `style_tags` | `Text`（JSON 字符串） | docu §4.2 标 "TEXT (JSON array)"；app 层 `json.dumps/loads`，不引入 SQLAlchemy 的 JSON 列类型（aiosqlite 对 JSON 支持需额外配置，过度工程） |
+| 5 个索引省略 `DESC` 修饰 | 直接按列建 ASC | docu §4.3 标 DESC 是查询提示；SQLite B-tree 双向遍历，对 `ORDER BY ... DESC` 无影响；Step 1.1 验收"等价命名"允许 |
+| `Base` 位置 | 放在 `app/models/__init__.py` 顶部 | 6 个模型一共 100 行，单文件最简；未来拆分再说，避免过早抽象 |
+| 模型不分文件 | 6 个模型全部写在 `app/models/__init__.py` | 同上 |
+| `app/db.py` 在 Step 1.1 创建（而非按 plan 等 Step 2.1） | 提前创建只放 engine + init_db | 避免 Step 1.1 init_db 与 Step 2.1 engine 产生两份独立 engine；Step 2.1 只在 db.py 增加 `async_session_maker` + `get_db` 依赖即可，不冲突 |
+
+**给后续开发者的提示：**
+- **新增模型**：在 `app/models/__init__.py` 里加新类（继承 `Base`），写到 `__all__` 列表，重启后端就会建表（dev 期）。生产环境用 Alembic 迁移，Demo 阶段不引入 Alembic。
+- **新增索引**：在 `__table_args__` 里加 `Index(...)`，删 db 再 `init_db()` 重建。`create_all` **不会**自动迁移已存在表的 schema（这是 SQLAlchemy 不是 ORM 缺陷）。
+- **engine 单例**：`from app.db import engine` 拿，不要 `create_async_engine` 创第二份；连接池配置统一在 `db.py` 调（目前默认配置足够 Demo）。
+- **Base 是登记处**：任何继承 `Base` 的模型只要被 import 过一次，就会出现在 `Base.metadata.tables` 里。Step 2.1 init_db 调用前，确保 `from app.models import ...` 已经执行（`__init__.py` 顶部 import 就够了）。
+- **seed 脚本（Step 1.2-1.5）操作模式**：直接用 `from app.db import engine` + `AsyncSession(engine)` 自己写 with-block；不需要走 FastAPI 的 `get_db` 依赖。
+- **删 nail_demo.db 想从头来**：直接删文件即可，下次启动 `init_db()` 自动重建；`*.db` 在 `.gitignore` 里不进仓。
+
+---
