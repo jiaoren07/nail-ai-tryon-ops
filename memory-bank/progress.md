@@ -264,3 +264,44 @@ tech-stack.md §1 已同步为实际版本。React 19 / Vite 8 / TS 6 已稳定 
 - **删 nail_demo.db 想从头来**：直接删文件即可，下次启动 `init_db()` 自动重建；`*.db` 在 `.gitignore` 里不进仓。
 
 ---
+
+### ✅ Step 1.2 · 导入款式库的 seed 脚本 — 2026-06-06
+
+**做了什么：**
+- 新建 `backend/scripts/seed_styles.py`（124 行）：从外部数据集 `d:\美团AI HACKATHON\dataset\` 把 25 女 + 15 男 = 40 款入库 + 复制 40 张封面图到 `backend/static/styles/` + 复制 17 张示例手图到 `backend/static/samples/`。
+- 表字段映射严格按 implementation-plan §1.2：
+  - 女款 25：从 `styles/tags_qwen.json` 读，id = key 去 `_enh.png`（如 `f_01`），cover_url=`/static/styles/{id}_enh.png`，gender 强制 `female`
+  - 男款 15：从 `styles/male/tags_qwen.json` 读，id = key 去 `.jpg`（如 `m_01`），cover_url=`/static/styles/{id}.jpg`，gender 信打标 JSON 的 `parsed.gender`（实测全部 `male`，无 `both`）
+  - `name` = `style_tags[:3]` 拼接（如 `纯色极简`、`深色系个性酷炫`），允许后续人工覆盖
+  - `style_tags` 存 `json.dumps(tags, ensure_ascii=False)`，保留中文原文
+  - `color_main` / `color_tone` / `length_pref` / `complexity` / `gender` 全部从打标 JSON 的 `parsed` 字段直接映射
+  - `heat_score=50.0`，`is_active=1`，`created_at=now(UTC)`
+  - `display_order` 全局按 id 字典序填 0–39（女款占 0–24，男款占 25–39）
+- 17 张手图 glob 用 `[0-9][0-9].png` 严格匹配编号文件，防止抓到非编号 PNG。
+- 脚本顶部 `sys.path.insert(0, BACKEND_ROOT)`，让 `from app.X import` 在任何 CWD 下都能解析；DATASET_DIR 用绝对路径 `r"d:\美团AI HACKATHON\dataset"`。
+- 幂等：`DELETE FROM styles` 再 INSERT；静态文件 `shutil.copyfile` 直接覆盖。
+
+**git 配置同步（用户拍板）：**
+- 根 `.gitignore` 新增 2 条：`backend/static/styles/` 和 `backend/static/samples/`。理由：两个目录都是 seed 脚本生成的派生资产，源头在外部 `d:\美团AI HACKATHON\dataset\`（CLAUDE.md 已经声明 dataset 在 repo 外），进 git 会带来 10~15 MB 重复存储 + 赛题数据集授权不明问题。与已存在的 `cache/` / `uploads/` 一致都归"运行时生成"忽略。
+- 注释行同步从"recreated at runtime"改为"recreated by seed scripts or at runtime"。
+
+**Step 1.2 验证（6/6 PASS）：**
+1. `SELECT COUNT(*) FROM styles` = **40** ✅
+2. `WHERE gender='female'` = **25**；`gender IN ('male','both')` 合计 = **15** ✅
+3. `SELECT id FROM styles ORDER BY id` 首 5 = `f_01..f_05`，末 5 = `m_11..m_15` ✅
+4. `backend/static/styles/` 含 **40 文件**（25 `f_*_enh.png` + 15 `m_*.jpg`）✅
+5. `backend/static/samples/` 含 **17 PNG** ✅
+6. 静态文件 URL 可访问 → **按 plan 延后到 Step 2.4**（静态挂载尚未实现）
+7. 附加：`display_order` 0–39 全部 distinct，无重复 ✅
+8. 附加：第二次 `python scripts/seed_styles.py` 总数仍 40，**幂等** ✅
+9. 附加：CJK 字段写入与读取无 mojibake（如 `m_15.name = "深色系个性酷炫"`）✅
+
+**给后续开发者的提示：**
+- **跑 seed 之前**：`$env:PYTHONIOENCODING="utf-8"` 否则 print CJK 会乱码（不影响入库，只影响日志可读）。
+- **数据集路径硬编码**：`DATASET_DIR = r"d:\美团AI HACKATHON\dataset"` 写死在脚本里，别人 clone 后必须有同样路径才能 seed。如果未来需要可移植，把它提到 `.env` 的 `DATASET_DIR` 即可（独立小改动）。
+- **DELETE FROM styles 安全**：SQLite 默认 `PRAGMA foreign_keys=OFF`，引用 styles 的 tryons / style_stats 不会阻塞删表，但**单独跑 seed_styles 会留下悬挂的 style_id 引用**。要么连带 seed_tryons + seed_stats 一起重跑，要么用 Step 1.6 的 `seed_all.py` 一键全清。
+- **`name` 字段不要随便改**：当前是 `style_tags[:3]` 拼接，前端 U2/U3 推荐页直接展示。如果人工覆盖个别款的 name 后再跑 seed，覆盖会被 DELETE+INSERT 抹掉——所以"人工覆盖"应该等 demo 稳定后再做，或把覆盖写成 SQL 文件版本化。
+- **男款 gender 字段**：所有 15 个目前都是 `male`。如果未来改 VLM 模型重新打标，可能出现 `both`——seed 脚本会自动信赖 JSON，无需改代码。
+- **静态文件被 gitignore 不进 git**：clone 后必须先 `python scripts/seed_styles.py` 才有图，否则后端 `/static/styles/...` 会 404。Step 2.4 静态挂载后也要先 seed。
+
+---

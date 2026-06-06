@@ -25,9 +25,11 @@ Meijia/
 *.db-shm
 *.db-wal
 
-# Runtime-generated static files (not committed; recreated at runtime)
+# Runtime-generated static files (not committed; recreated by seed scripts or at runtime)
 backend/static/cache/
 backend/static/uploads/
+backend/static/styles/
+backend/static/samples/
 
 # IDE / OS
 .vscode/
