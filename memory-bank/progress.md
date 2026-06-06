@@ -305,3 +305,40 @@ tech-stack.md §1 已同步为实际版本。React 19 / Vite 8 / TS 6 已稳定 
 - **静态文件被 gitignore 不进 git**：clone 后必须先 `python scripts/seed_styles.py` 才有图，否则后端 `/static/styles/...` 会 404。Step 2.4 静态挂载后也要先 seed。
 
 ---
+
+### ✅ Step 1.3 · 人工指定款式角色（爆款/冷门/热门候选）— 2026-06-07
+
+**做了什么：**
+- 在 `backend/scripts/` 下创建两份配置：
+  - `style_roles.json`：分 `female` / `male` 两个 pool，每个 pool 下 4 键 `stable_hot` / `emerging_hot` / `cold` / `long_tail`，对应 `style_id` 数组。
+  - `style_roles_README.md`：40 行解释，每行 `<id>: <角色> — <一句话理由>`，对照 [tags_qwen.json](file:///d:/美团AI%20HACKATHON/dataset/styles/tags_qwen.json) 的打标维度做选定推导。
+- AI 提议分配 + 用户拍板。完整 40 款角色见 [`style_roles.json`](../backend/scripts/style_roles.json)；推导依据见 [`style_roles_README.md`](../backend/scripts/style_roles_README.md)。
+
+**角色分配速览：**
+
+| pool | stable_hot | emerging_hot | cold | long_tail |
+|---|---|---|---|---|
+| female (25) | f_01, f_13, f_14 | f_09, f_15 | f_05, f_08, f_11 | 其余 17 款 |
+| male (15) | m_01, m_06 | m_15 | m_10, m_13 | 其余 10 款 |
+
+**关键选定策略（与 implementation-plan §1.3 三条原则的对应）：**
+- `stable_hot` 命中"纯色/极简/法式/哑光/商务"等通用关键字 + 低复杂度。男款 `m_01` (warm) 与 `m_06` (cool) 故意选不同 tone，制造"两种稳态"对比。
+- `emerging_hot` 选视觉辨识度最高的款：`f_09`（跳色+镶钻+复杂图案三冲击）、`f_15`（warm + 几何稀缺维度）、`m_15`（黑色 cool + 酷炫几何）。
+- `cold` 选风格小众/反主流：`f_05`（25 款女款里唯一 short）、`f_08`/`f_11`（透明少见维度）、`m_10`/`m_13`（朋克标签极小众）。
+- `long_tail` 兜底其余。
+
+**Step 1.3 验证（全部 PASS）：**
+1. `style_roles.json` 女款合并集合 = `f_01..f_25`，无重复无遗漏 ✅
+2. `style_roles.json` 男款合并集合 = `m_01..m_15`，无重复无遗漏 ✅
+3. 各角色名额数量精确匹配 plan（3/2/3/17 + 2/1/2/10）✅
+4. `style_roles_README.md` 共 40 行 entry，格式 `- \`<id>: <角色> — <理由>\`` ✅
+5. README ↔ JSON 每个 id 的角色赋值零冲突 ✅
+
+**给后续开发者的提示：**
+- **不在 DB 里**：角色分配是 seed 阶段的"导演控制"，不写入 `styles` 表。Step 1.4 `seed_tryons.py` 读这份 JSON 决定每款的 60 天行为分布。
+- **改了角色就要重跑后续 seed**：调整某款的 cold→long_tail 等，跑 1.4 + 1.5 重生成行为/聚合数据才会生效，DB 里的 `styles` 表不需要动。
+- **plan 里的 stable_hot 数量 (3)** 跟分配数量对应。所有数值改动要同时改 plan 和 README（不要单边偏移），否则 Step 1.4 的概率分布会算错。
+- **README 的 markdown 格式很严格**：每条 entry 必须是 `` - `<id>: <role> — <reason>` ``（反引号包整段、有 em-dash 分隔），否则 Step 1.4 的脚本如果想读 README 解析角色会失败。Step 1.4 实际读 JSON 不读 README，README 只是给人看的依据。
+- **角色不是性能 KPI**：演示阶段 `emerging_hot` 在最后 5 天指数增长 → O2 爆款看板会高亮；`cold` 在 O3 冷门看板会预警。前端实际是按 `style_stats` 聚合表读数，不直接读这份 JSON。
+
+---
