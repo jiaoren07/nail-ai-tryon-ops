@@ -124,3 +124,44 @@ tech-stack.md §1 已同步为实际版本。React 19 / Vite 8 / TS 6 已稳定 
 - Step 0.5 用 `pydantic-settings` 读 `.env`，字段名必须与本步骤完全一致（区分大小写）。
 
 ---
+
+### 📝 设计修订（非 Step）· L0 + U0/U1 swap + O7=设置中心 + 品牌色板 — 2026-06-06
+
+**背景：**
+用户提供原型 Board 0~9（共 11 张图，含一张早期合并版）+ 17 色品牌色板。比对发现 4 处现行 docu 与原型差异：
+1. 原型 Board 0 是 L0 双端入口 landing，docu 里 `/` 直接 redirect 到 `/upload`，缺这一层
+2. 原型流程是"先性别后上传"（Board 1 三屏顺序：U0 性别 → U1 上传 → U2 推荐），docu 是反的
+3. 原型 Board 9 是"设置中心"4 tab，不是 docu 里写的"O7 报告中心"独立页面
+4. docu 里没有品牌色板的 single source of truth，前端配色无锚
+
+**做了什么（commit `e7f91a4`）：**
+
+- **L0 双端入口落入 design-docu §6.0**：双端入口 + `/` 改为完整页面而非 redirect；implementation-plan 新增 Step 5.2 "L0 双端入口"，原 Phase 5 步骤 5.2~5.7 顺序下移并改名：5.3=U0 性别、5.4=U1 上传、5.5=U2 推荐、5.6=U3 浏览、5.7=U4 对比、5.8=U5 结果。Phase 5 标题从"6 步"改"8 步"。
+- **U0/U1 swap**：design-docu §6.1 = U0 性别选择页（路由 `/gender`，无前置守卫，从 L0 跳来或直接访问都允许）、§6.2 = U1 手图上传页（路由 `/upload`，前置守卫检查 sessionStorage 的 `userGender` 存在）。implementation-plan Step 5.3 / 5.4 同步重写。
+- **O7 重定义为设置中心**：design-docu §7.7 完整改写——4 tab（账号工作台 / 通知与邮件订阅 / AI 助手偏好 / 显示与界面）。原"独立报告中心 `/ops/reports` 列表"取消，历史报告列表降级到「通知与邮件订阅」tab 底部最近 10 条；报告详情路由 `/ops/reports/:id` 保留（铃铛通知或设置中心列表行点击进入）。**后端 APScheduler + reports/notifications 表 + 邮件发送子系统全部保留**——只是前端入口集中。Phase 9 标题改为"报告通知子系统 + O7 设置中心"，Step 9.4 重写为"O7 设置中心前端（含通知与邮件订阅 tab + 报告详情）"。§13.3 标题去掉"O7 报告中心叙事"措辞。
+- **品牌色板入 tech-stack §2.5**：核心 5 色记忆点（`#FFD100` Brand / `#111111` Ink / `#FAF8F2` Page / `#FFFFFF` Card / `#7C5CFF` AI Purple）+ 完整 17 色 token 表（brand / surface / text / line / ai / semantic 六大类）+ Tailwind config（用户端）+ antd ConfigProvider token（运营端）双端映射。声明为 single source of truth，新颜色一律先回到 §2.5 加 token；组件内禁止裸写 hex。
+
+**附带改动：**
+- design-docu §2.1 架构图：把"展现层"加一行"共享入口 L0（/，双端分流 landing）"
+- §11.2 路由表：完整刷新（/=L0、/gender=U0、/upload=U1、/ops/setting=O7、/ops/reports/:id 保留为详情入口）
+- §10 / §12.2 / §13.3 / 附录 A 文件结构里所有"报告中心"措辞统一改"设置中心"或"报告/通知子系统"
+- §1.3 演示故事主线**没动**——原文本来就符合"先选性别再上传"的流程
+- tech-stack §2.2 `O1-O6` 笔误改 `O1-O7`，并补一句"两端共用 §2.5 色板"
+- implementation-plan Step 5.1 验证路径数从"约 13 个"改"约 15 个"（L0 + 7 user + 7 ops）
+
+**验证：**用户在 AskUserQuestion 里逐项拍板（Landing 编号=L0、铃铛保留、4 份 docu 一次性 commit、色板按表 = 5 核心 + 完整 17）。docu 改完镜像 root ↔ memory-bank 三对全部 SHA256 一致。
+
+**影响范围：**
+- 6 个文件改动：`design-docu.md` / `implementation-plan.md` / `tech-stack.md` 各 root + memory-bank 副本，单次 commit `e7f91a4` 提交（478 insertions / 232 deletions）
+- 后续 Step 5.x **必须按修订后的顺序与编号**执行
+- 前端实现要严格按 tech-stack §2.5 的 token 配置 Tailwind 与 antd
+- Step 0.1 ~ 0.4 全部保持有效，无回滚
+
+**给后续开发者的提示：**
+- 看到 Step 5.2 / 5.3 这种编号请按**修订后**的语义理解：Step 5.2 = L0 landing、5.3 = U0 性别、5.4 = U1 上传。**不是**旧版的"5.2=上传、5.3=性别"。
+- `/ops/reports`（列表）路径已经不存在，只剩 `/ops/reports/:id` 详情；不要复活旧的独立列表页路由。
+- 颜色一律从 tech-stack §2.5 引用，禁止在组件文件里裸写 hex。AI 紫不在 antd 标准 token 里，运营端通过 CSS var `--ai-purple` 引用。
+- O4 没有独立 UI Board——它的前端入口被合并到 O7 设置中心 →「通知与邮件订阅」tab 底部。
+- 关联的原型图在仓库根 `原型1/` 下（Board_00 ~ Board_09），文件按 Board 编号 + 模块名规范命名（详见下一条 prototype 整理记录）。
+
+---
