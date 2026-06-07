@@ -401,3 +401,44 @@ implementation-plan 的 "stable_hot 款每日 80-150 次" 等没明示 per-style
 - **`_check_tryons.py` 是工具不是产品**：以下划线开头明示，将来 commit 进仓但不参与运行时；如果觉得碍事可以删，重写一份验证 SQL 也能跑。
 
 ---
+
+### ✅ Step 1.5 · 生成 style_stats 聚合数据 — 2026-06-07
+
+**做了什么：**
+- 新建 `backend/scripts/seed_stats.py`：从 `tryons` 表按 `(style_id, date(created_at, 'localtime'))` GROUP BY 聚合到 `style_stats`。
+- 聚合字段映射：
+  - `tryon_count` = `COUNT(*)`
+  - `collect_count` = `SUM(CASE WHEN is_collected = 1 THEN 1 ELSE 0 END)`
+  - `exposure_count` = `tryon_count × random.uniform(8, 20)`
+  - `click_count` = `max(tryon_count, exposure_count × random.uniform(0.05, 0.25))`
+- 日期分桶用 `date(created_at, 'localtime')`，把 UTC 存储的 `created_at` 转回北京日，确保聚合粒度是北京日历日（与 design-docu §4 时区约定一致）。
+- `stat_date` 从字符串 'YYYY-MM-DD' 通过 `date.fromisoformat()` 转 `datetime.date` 后入库，SQLAlchemy 的 `Date` 列正确写入。
+- 幂等：`DELETE FROM style_stats` 再 INSERT。
+
+**Step 1.5 验证（3/3 PASS + 用户手动验证一致）：**
+
+| 验证项 | 实测 | 结果 |
+|---|---|---|
+| 1) `COUNT(*) FROM style_stats` ∈ [1000, 1500] | **1433** | ✅ |
+| 2) 抽 5 行检查 `click >= tryon` 且 `exposure >= click` | 5/5 全部满足不变式 | ✅ |
+| 3) `SUM(tryon_count)` == `COUNT(*) FROM tryons` | 13233 == 13233（完全相等）| ✅ |
+| 附加：幂等性（重跑 1433 → 1433） | 完全相同 | ✅ |
+
+**plan 验证范围 [1000, 1500] 的边界注释：**
+plan 当时假设 25 女款，所以 "25 × 实际有数据的天数 = 1500 上限"。我们现在 40 款，理论上限 40 × 60 = 2400。实测 1433 仍落进原范围，原因是 **long_tail 27 款共享 bucket-global 5-40 events/日，分摊后每款每日期望事件 < 1**，许多 `(style_id, stat_date)` 组合没数据 → 不产生行。这个"自然稀疏"刚好让总数与 plan 旧范围吻合，**纯属巧合不是设计**。如果有人调整 long_tail 数量或 bucket-global → per-style，这个边界会被突破。
+
+**副产物自检（不在硬验证但顺便看）：**
+- 不同 stat_date：60（北京日完整覆盖 [2026-04-09, 2026-06-07]）
+- 不同 style_id：40（每款都至少一天有数据）
+- `exposure / tryon` 倍数实测 [8.0, 19.94]，avg 13.78 → 完全吻合 `random(8, 20)`
+- `click / exposure` 比例实测 [0.051, 0.248]，avg 0.136 → 完全吻合 `random(0.05, 0.25)`
+- 56% 的行 `collect_count = 0` —— cold/long_tail 的低收藏天数自然占比
+
+**给后续开发者的提示：**
+- **顺序依赖**：必须先 `seed_styles.py` 再 `seed_tryons.py` 再 `seed_stats.py`。前两步漏掉，`style_stats` 会空表。Step 1.6 的 `seed_all.py` 强制顺序。
+- **`exposure_count` 和 `click_count` 是合成数**：plan 没有真实曝光/点击日志，这两列是按 tryon 倍率反向编造，用于 O3 冷门看板的"曝光点击比"诊断。**修改公式会影响 O3 阈值**：plan §7.3 定义"近 7 天点击曝光比 ≤ 2%"为冷门触发条件之一，当前公式给出的实际比例分布在 [5%, 25%]，所以这条规则在现状下不会误报；但如果你调倍率到 [2, 5]，就要相应调阈值。
+- **`stat_date` 是北京日**：所有运营端"今日/本周/近 7 天" SQL 都应该用 `date('now', 'localtime')` 跟这一列对齐，不要用裸 `date('now')`（默认 UTC，凌晨 0-8 点会错位 1 天）。
+- **重跑 seed_stats 是安全的**：只动 `style_stats` 表，不影响 `tryons` / `styles`。但 seed_stats 的结果依赖当下 `tryons` 内容，所以**改了 seed_tryons.py 后必须连带重跑 seed_stats**，否则 stats 数据与 tryons 不一致。
+- **`exposure_count >= click_count` 不变式靠 `max()` 兜底**：极端低 tryon_count 时（如 tryon=1），`exposure ≈ 12`、`click = max(1, exposure × random(0.05, 0.25))` 可能正好等于 `tryon_count`。这是有意的边界保护，不是 bug。
+
+---
