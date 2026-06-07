@@ -342,3 +342,62 @@ tech-stack.md §1 已同步为实际版本。React 19 / Vite 8 / TS 6 已稳定 
 - **角色不是性能 KPI**：演示阶段 `emerging_hot` 在最后 5 天指数增长 → O2 爆款看板会高亮；`cold` 在 O3 冷门看板会预警。前端实际是按 `style_stats` 聚合表读数，不直接读这份 JSON。
 
 ---
+
+### ✅ Step 1.4 · 生成 60 天历史试戴行为 — 2026-06-07
+
+**做了什么：**
+- 新建 `backend/scripts/seed_tryons.py`：从 `style_roles.json` 读两个 pool 的角色分配，生成 60 天试戴行为。
+- 新建 `backend/scripts/_check_tryons.py`（内部校验工具，下划线打头）：一键跑 Step 1.4 全部 5 条验证项，避免 5 条内联 PowerShell SQL 命令踩双重引号坑。
+- 时间窗口：`[今天−59, 今天]` 共 60 天（含今天），以北京时区（UTC+8）为锚。事件时间存储为 naive UTC，SQL 查询统一加 `'localtime'` 修饰符转回北京日，符合 design-docu §4 时区约定。
+- 字段分布：
+  - `user_id` 随机 UUID v4
+  - `user_gender` 永远从 `style.gender` 派生（女款 → female，男款 → male，both 50/50；严守 plan 警告"不要 70/30 全局抽样"）
+  - `skin_tone` / `hand_shape` 各从 5/3 个枚举均匀抽取
+  - `from_module` 按 50/30/20 概率取 `recommend`/`browse`/`compare`
+  - `is_collected` 按角色概率：stable_hot 25% / emerging_hot 30% / cold 5% / long_tail 12%
+  - `created_at` 北京时间 hour ∈ [8, 23]，转 UTC 存储
+
+**plan §1.4 字面表述歧义 + 我的解读（透明告知）：**
+implementation-plan 的 "stable_hot 款每日 80-150 次" 等没明示 per-style / per-pool / per-bucket-global 哪种。三种解读分别算下来：
+
+| 解读 | 总数估算 | 验证 [4000, 18000] |
+|---|---|---|
+| per-style（每款独立跑） | ~75000 | ❌ 远超 |
+| per-pool-per-bucket（性别 × 角色独立日配额） | ~19000 | ❌ 略超 |
+| **混合**（用过的最终方案） | ~12000~13000 | ✅ 稳过 |
+
+**混合解读分桶规则**：
+
+| 角色桶 | 解读 | 理由 |
+|---|---|---|
+| stable_hot | bucket-global（5 款共享 80-150/日） | 不然单桶就破 18000 |
+| long_tail | bucket-global（27 款共享 5-40/日） | 同上 |
+| **emerging_hot** | **per-style** + spike base [30, 40] | bucket-global 会让 3 款共分 spike 峰值被稀释到 ~30，达不到 plan 要求的 5× peak ratio |
+| cold | per-style ≤ 20 | 验证文明文要求 |
+
+**spike base 调整**：plan 字面是 [10, 30]，但 plan 自己要求 peak day ≥ 5× pre-55 avg。pre-55 avg 是 20（[10, 30] 中点），所以 peak day 需要 ≥ 100。mult=3.5 时 base 必须 ≥ 28.6。用 [30, 40] 留 margin，确保多次 reseed 都过。
+
+**Step 1.4 验证（5/5 PASS，独立 reseed 三次都过）：**
+
+| 验证项 | 实测 |
+|---|---|
+| 1. 总数 ∈ [4000, 18000] | 12590 / 13050 / 13233（用户验证那次） |
+| 2. 日期范围 = [2026-04-09, 2026-06-07] | 精确匹配北京日 |
+| 3. emerging_hot 每款 peak ratio ≥ 5× | f_09=6.23×, f_15=7.30×, m_15=6.11×（用户验证） |
+| 4. cold 每款 ≤ 20 | 最大 19（17, 19, 11, 14, 17） |
+| 5. cross-pollination = 0 | female_style × male_user = 0，male_style × female_user = 0 |
+
+**副产物自检**（不在硬验证里但顺便看）：
+- `is_collected` 收藏率：stable 25% / emerging 31% / cold 7% / long_tail 12% → 与配置概率高度吻合
+- `from_module` 来源分布：49.6% / 30.4% / 20.0% → 精确匹配 50/30/20 概率
+- 时间分布：北京 8:00–23:59 内随机，转 UTC 后 `date(created_at, 'localtime')` 仍能正确回到北京日
+
+**给后续开发者的提示：**
+- **re-seed 后必跑 `_check_tryons.py`**：一行命令验证全部，特别是 emerging_hot 5× 验证项对随机方差敏感，连续 reseed 偶尔可能逼近 5× 边缘；几乎所有失败都是 spike base 设置或角色 emerging 数量改变导致的。
+- **跑 seed_tryons 前必须先 seed_styles**：`tryons.style_id` 引用 `styles.id`，虽然 SQLite 默认 FK off 不阻塞，但 styles 表为空时随机选不到东西会崩。
+- **时间存储约定**：seed 写 naive UTC datetime；查询统一用 `date(<col>, 'localtime')` 转北京日。两边对齐这一条，整个时序逻辑就不会错位。
+- **角色概率调整入口**：`COLLECT_PROB_BY_ROLE` 字典在 `seed_tryons.py` 顶部，改动后重跑即可。其他常量（SKIN_TONES、HAND_SHAPES、FROM_MODULES_BAG）同位置。
+- **每天试戴量调整**：`_daily_bucket_count`（stable / long_tail）和 `_daily_per_style_emerging_count`（emerging）两个函数是数量旋钮，改这里。如果再改 spike base 或 multipliers，记得跑 `_check_tryons.py` 看 5× 验证是不是还过。
+- **`_check_tryons.py` 是工具不是产品**：以下划线开头明示，将来 commit 进仓但不参与运行时；如果觉得碍事可以删，重写一份验证 SQL 也能跑。
+
+---
