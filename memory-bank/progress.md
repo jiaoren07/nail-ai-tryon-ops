@@ -442,3 +442,37 @@ plan 当时假设 25 女款，所以 "25 × 实际有数据的天数 = 1500 上�
 - **`exposure_count >= click_count` 不变式靠 `max()` 兜底**：极端低 tryon_count 时（如 tryon=1），`exposure ≈ 12`、`click = max(1, exposure × random(0.05, 0.25))` 可能正好等于 `tryon_count`。这是有意的边界保护，不是 bug。
 
 ---
+
+### ✅ Step 1.6 · 统一 seed 入口 — 2026-06-08
+
+**做了什么：**
+- 新建 `backend/scripts/seed_all.py`（73 行）：一条命令完成 `init_db()` → `seed_styles()` + `_copy_static()` → `seed_tryons()` → `seed_stats()` 全链路。每步打印时间戳 + 受影响行数 + 该步骤耗时。Pipeline 设计成把各步独立函数串起来，不复用各文件的 `_main()`，避免重复 `engine.dispose()` 与 `asyncio.run()` 冲突。
+- 改 `seed_tryons.py` + `seed_stats.py`：两个函数入口加 `random.seed(42)`，让任何机器、任何时间跑 `seed_all.py` 给出**严格一致**的结果（满足 plan §1.6 验证要求"数据条数应与第一次完全相同"）。
+
+**为什么固定种子=42 而不是基于时间：**
+plan §1.6 验证文明文要"完全相同"。如果不设种子，连续两次跑会得到不同行数（前次实测 12392 → 12751 → 12847）。固定种子让：
+1. 验证 4 "幂等" 强约束达到 → 三次连续运行 `seed_all.py` 给出 `12847 / 1432` 三次完全一致
+2. 演示数据可复现：bug 出在哪条数据上，跨机器 reseed 一定能重现
+3. `_check_tryons.py` 的 peak ratio 等 "接近边界" 验证不再受随机方差影响（实测 6.97×/7.10×/7.22× 稳定通过）
+
+UUID（`user_id`）仍然走 `os.urandom`（uuid.uuid4 的底层），所以每次 `user_id` 不同；只是行数与分布完全一致。
+
+**Step 1.6 验证（4/4 PASS）：**
+
+| 验证项 | 实测 | 状态 |
+|---|---|---|
+| 删 `nail_demo.db` 后一条命令跑通全 seed | 5.6 秒完成 | ✅ |
+| 打印 `styles=40 tryons=XXXX stats=YYYY` 与 DB 一致 | `40 / 12847 / 1432` 三处完全一致 | ✅ |
+| 全脚本 < 60 秒 | 5.6 秒（**远**低于 60s 预算） | ✅ |
+| 第二次连续运行结果完全相同（幂等） | 三次独立运行均产出 12847/1432 | ✅ |
+
+**给后续开发者的提示：**
+- **首次 clone 后初始化数据库**：`cd backend && .\.venv\Scripts\Activate.ps1 && del nail_demo.db; python scripts\seed_all.py`，5-6 秒全部就绪。
+- **修改了任意 seed 脚本后**：跑 `seed_all.py` 重建全表，而不是只跑改动的那个——避免下游表（如 `style_stats`）与上游（`tryons`）漂移。
+- **演示数据想换一套**：改 `random.seed(42)` 里的 42 为别的整数即可，整个数据集会沿同样规则生成新一套确定数据。
+- **想恢复"每次都微随机"**：把两处 `random.seed(42)` 删掉，但会失去 plan §1.6 的"完全相同" idempotence。
+- **演示前必跑 `seed_all.py`**：保证演示场景从干净基线出发。如果 demo 当中跑了真实试戴生成新 tryons 后想 reset，再跑一次 `seed_all.py` 5 秒内恢复。
+- **`_copy_static()` 是同步调用**：seed_all 里没用 await，因为它是普通函数（`shutil.copyfile` 同步）。同样的，未来要并行化 IO 必须改造该函数。
+- **Phase 1 全部完成**：6 张表 + 数据全部就位。下一步进 Phase 2 后端基础设施（DB 注入、统一响应包装、路由骨架、静态挂载），开始为 Phase 4 真正的业务 API 铺路。
+
+---

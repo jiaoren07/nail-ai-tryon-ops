@@ -34,6 +34,8 @@ from app.models import StyleStats  # noqa: E402
 
 
 async def seed_stats() -> int:
+    # Fixed seed for Step 1.6 strict idempotence on exposure_count/click_count.
+    random.seed(42)
     async with AsyncSession(engine) as session:
         await session.execute(delete(StyleStats))
 

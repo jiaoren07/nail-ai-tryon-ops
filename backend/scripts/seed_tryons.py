@@ -152,6 +152,9 @@ def _build_events(styles_by_id: dict[str, Style], roles: dict) -> list[Tryon]:
 
 
 async def seed_tryons() -> int:
+    # Fixed seed for Step 1.6 strict idempotence: 两次连续运行行数完全相同。
+    # UUIDs in _make_event still vary (they use os.urandom via uuid4).
+    random.seed(42)
     with ROLES_FILE.open(encoding="utf-8") as f:
         roles = json.load(f)
     async with AsyncSession(engine) as session:
