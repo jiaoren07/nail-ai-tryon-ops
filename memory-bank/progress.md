@@ -476,3 +476,36 @@ UUID（`user_id`）仍然走 `os.urandom`（uuid.uuid4 的底层），所以每�
 - **Phase 1 全部完成**：6 张表 + 数据全部就位。下一步进 Phase 2 后端基础设施（DB 注入、统一响应包装、路由骨架、静态挂载），开始为 Phase 4 真正的业务 API 铺路。
 
 ---
+
+### ✅ Step 2.1 · 数据库依赖注入 — 2026-06-09
+
+**做了什么：**
+- `backend/app/db.py` 扩展（在 Step 1.1 已有的 `engine` + `init_db()` 基础上）：
+  - 加 `async_session_maker = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)`
+  - 加 `async def get_db() -> AsyncIterator[AsyncSession]`：FastAPI 异步生成器依赖，`async with` 自动关 session、异常 rollback。
+- `backend/app/main.py` 接入 lifespan：
+  - 用 `@asynccontextmanager` 包 `lifespan(app)`，在 `yield` 前调用 `await init_db()`
+  - `FastAPI(..., lifespan=lifespan)` 接入
+  - 不用已废弃的 `@app.on_event("startup")` 装饰器
+- **验证用的 `/api/_debug/count_styles` 路由按 plan 要求加了 → curl → 移除**，main.py 落地状态干净，路由清单仅含 5 条标准（`/openapi.json`, `/docs`, `/docs/oauth2-redirect`, `/redoc`, `/api/health`）。
+
+**Step 2.1 验证（5/5 PASS，用户人工核对）：**
+
+| 维度 | 证据 |
+|---|---|
+| 路由清单干净（无 `_debug` 残留） | 用户跑 import smoke 输出 5 条标准路由 |
+| `init_db()` 被 lifespan 调用 | uvicorn 输出 `Application startup complete` |
+| `get_db` 撑起接口（plan §2.1 临时调试路由）| 用户 curl `/api/_debug/count_styles` → HTTP 200 body=`40` |
+| `/api/health` 响应结构未被破坏 | 用户 curl 返回 `{code:0,msg:"ok",data:{service:"nail-demo",env:{IMAGE_PROVIDER:"mock",SCHEDULER_ENABLED:true}}}` 完全匹配 Step 0.5 形状 |
+| 应用能优雅关闭 | Ctrl+C 后 uvicorn 打印 `Application shutdown complete` |
+
+注意：plan 验证 body 写"返回 25"，是 25 女款时代的数字；现在 40 款返回 40，符合预期扩展。
+
+**给后续开发者的提示：**
+- **新增需要 DB 的路由**：在 `routers/user.py` / `routers/ops.py`（Phase 2.3 创建）里 `db: AsyncSession = Depends(get_db)`，会自动拿到 session。不要在路由里 `from app.db import async_session_maker` 手动创建——失去 FastAPI 依赖管理的好处（异常 rollback、生命周期对齐请求）。
+- **`expire_on_commit=False` 的副作用要懂**：commit 后 ORM 对象的属性不会被标记过期，直接读不会重发 SQL。优点：Step 4.6 "试戴写入后立即返回 id + result_url" 流程不需要 `refresh()`。陷阱：如果某行被别人改了，commit 后再读还是旧值——但 demo 单进程不会触发。
+- **lifespan vs on_event**：FastAPI 0.93+ 推荐 lifespan，未来 Step 9.2 接 APScheduler 时会复用——`yield` 前 `scheduler.start()`，`yield` 后 `scheduler.shutdown()`，不用拆两个 startup/shutdown handler。
+- **`/api/_debug/*` 调试路由约定**：plan 全篇这种"加→验→删"的临时路由都走 `/api/_debug/` 前缀，commit 时务必清空。一个 grep `_debug` 还能看到东西就是泄漏。
+- **`get_db()` 不要嵌套使用**：一个请求一个 session。不要在一个请求里 `async for s in get_db()` 拿第二份，会触发新连接，不必要的开销。
+
+---
