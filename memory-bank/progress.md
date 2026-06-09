@@ -509,3 +509,39 @@ UUID（`user_id`）仍然走 `os.urandom`（uuid.uuid4 的底层），所以每�
 - **`get_db()` 不要嵌套使用**：一个请求一个 session。不要在一个请求里 `async for s in get_db()` 拿第二份，会触发新连接，不必要的开销。
 
 ---
+
+### ✅ Step 2.2 · 统一响应包装与异常处理 — 2026-06-09
+
+**做了什么：**
+- 新建 `backend/app/responses.py`（27 行）：
+  - `ok(data, msg="ok")` 工厂函数：返回 `{code: 0, msg, data}` 字典，路由 `return ok(data=...)` 即可，无需手写 envelope
+  - `http_exception_handler`：捕 `HTTPException` 并发回 `{code: status_code, msg: detail, data: null}`，HTTP 状态码与 `code` 同步
+  - `unhandled_exception_handler`：catch-all，`logger.exception()` 记录 traceback（含异常类型+栈）+ 发回 `{code: 500, msg: "internal_error", data: null}`，**不把内部错误细节泄露给前端**
+- `main.py` 改动：
+  - 注册两个全局异常处理器：`app.add_exception_handler(HTTPException, ...)` + `app.add_exception_handler(Exception, ...)`
+  - `/api/health` 路由从手写 dict 改用 `ok(data=...)` 包装——**响应内容字节级不变**，只是构造方式更统一
+
+**Step 2.2 验证（3/3 PASS，curl.exe 实测）：**
+
+| 测试路径 | 触发 | HTTP 状态码 | Body | 状态 |
+|---|---|---|---|---|
+| `/api/health` | 正常路径 | 200 | `{"code":0,"msg":"ok","data":{...}}` 与 Step 0.5 一字不差 | ✅ |
+| 临时 `/api/_debug/raise` | `raise HTTPException(404, "not found")` | **404** | `{"code":404,"msg":"not found","data":null}` | ✅ |
+| 临时 `/api/_debug/boom` | `return 1/0` ZeroDivisionError | **500** | `{"code":500,"msg":"internal_error","data":null}` | ✅ |
+
+验证完成后两个调试路由按 plan 要求删除，最终 main.py 路由清单仅含 5 条标准（`/openapi.json` / `/docs` / `/docs/oauth2-redirect` / `/redoc` / `/api/health`）。
+
+**踩到的 PowerShell 坑（记下来）：**
+- `Invoke-WebRequest` 在收到 4xx/5xx 响应时**会丢 body**（即便 `-UseBasicParsing`），只能拿到 HTTP 状态码。验证 4xx/5xx 接口必须用 `curl.exe`（Windows 10+ 自带）或 `Invoke-RestMethod -SkipHttpErrorCheck`（PowerShell 7+ 才有）。
+- `curl.exe -s -w "[status=%{http_code}]"` 是验证响应体 + 状态码的最快方式。
+
+**给后续开发者的提示：**
+- **所有业务路由都要用 `ok(data=...)`**：禁止手写 `return {"code": 0, "msg": "ok", "data": ...}`——一是冗长，二是一旦后续 envelope 结构调整就要 grep 全仓改。Step 4.x / 6.x 写每个接口时严格遵守。
+- **想返回特定错误码**：`raise HTTPException(status_code=4xx, detail="<语义化提示>")`，全局 handler 会自动包成 envelope。**不要在路由里手写 `return {"code": 404, ...}` 模拟错误**——会丢掉 HTTP 状态码语义。
+- **`HTTPException` 的 `detail` 字段可以是 str / dict / list**：当前 handler 用 `str(exc.detail)` 强转字符串。未来需要发结构化错误（如 form 验证），需要扩展 handler 处理 dict 情形。
+- **`unhandled_exception_handler` 的日志会进 uvicorn 的 stdout**：演示时盯着终端就能看 traceback。生产环境应换 Python logging 配置文件接 Sentry / file rotation 等。
+- **`logger = logging.getLogger("nail_demo")` 是唯一 logger 名**：未来所有模块（services/llm.py、services/email.py 等）想打日志的都用 `logging.getLogger("nail_demo.xxx")` 子 logger，统一可控。
+- **不要捕获更细的 `Exception` 子类（如 `RuntimeError`）**：当前 catch-all 已经覆盖，加细化 handler 会破坏"内部错误不泄露"的统一语义。除非业务层有特定错误类（如 `ConfigError`、`ImageGenError`）需要专门 4xx 映射。
+- **OpenAPI 文档不会显示 envelope**：因为 health 等接口没声明 response_model，Swagger 还是把 `Dict` 作为返回类型呈现成 `{additionalProp1: {}}`。这是 plan 接受的现状，不修；后续若需要可加 `class ApiEnvelope(BaseModel)` 模型并在每个路由 `response_model=ApiEnvelope[StyleListData]`，但会大幅增加样板代码。
+
+---
