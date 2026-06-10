@@ -588,3 +588,46 @@ plan §2.3 原话"两个 ping 验证后删除（或保留也行，开发期无�
 - **Pydantic request/response 模型可以同文件**：未来 Step 4.2 的 `UploadResponse` 之类直接在 user.py 顶部 `class UploadResponse(BaseModel): ...`，紧贴使用它的路由。**不要拆 schemas.py**。
 
 ---
+
+### ✅ Step 2.4 · 静态文件服务（+ Step 2.2 异常 handler 回填）— 2026-06-10
+
+**做了什么：**
+- `backend/app/main.py`：
+  - `from fastapi.staticfiles import StaticFiles` + `app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")`
+  - `BACKEND_ROOT = Path(__file__).resolve().parent.parent` + `STATIC_DIR = BACKEND_ROOT / "static"`，让路径独立于 cwd
+- **Step 2.2 回填**：把 `app.add_exception_handler(fastapi.HTTPException, ...)` 改成 `app.add_exception_handler(starlette.exceptions.HTTPException, ...)`。理由：
+  - `StaticFiles` 找不到文件时抛的是 **Starlette 的 HTTPException**，不是 FastAPI 子类
+  - 未匹配业务路由（如 `/api/does_not_exist`）的 404 也走 Starlette
+  - Step 2.2 当时只测了"路由里 `raise HTTPException()`"那一种场景，漏了上面这两种
+  - 注册到 Starlette 父类一行覆盖全部（FastAPI 的 HTTPException 是 Starlette 的子类）
+
+**Step 2.4 验证（5/5 PASS）：**
+
+| 测试 | 结果 |
+|---|---|
+| `GET /static/styles/f_01_enh.png` | HTTP 200，1,221,491 字节，**SHA256 与磁盘一致** |
+| 随机 5 女 + 3 男 + 3 hands = 11 个文件 | 11/11 全部 200 + 实际字节 |
+| `GET /static/styles/nope.png`（StaticFiles 404）| `{"code":404,"msg":"Not Found","data":null}` + status 404，**走信封** |
+| `GET /api/does_not_exist`（未匹配业务路由 404）| 同上信封 |
+| `/api/ping` / `/api/health` 不破坏 | 完全一致 |
+
+**踩到的两个坑（已经在过程中处理掉，记下来供后续避坑）：**
+
+1. **僵尸 uvicorn 占着 8000 端口**：PowerShell 的 `Start-Job` 启动 native exe 后，`Stop-Job` 不一定能干净杀掉子进程。前面几次后台 uvicorn 测试残留了一个跑**旧版 main.py**（还没有 static mount）的 python.exe 在 8000 上，导致新启动的 uvicorn `bind: address already in use`，但 curl 仍然能连到僵尸进程返回 404。验证陷入"代码看着对、行为不对"的怪状。
+   - **修法**：每次测前后跑 `Get-NetTCPConnection -LocalPort 8000 | Stop-Process -Force`，显式回收。
+   - **诊断技巧**：`Get-NetTCPConnection -LocalPort 8000` 看 PID + `Get-Process <pid>` 看进程路径，能确认是不是僵尸。
+
+2. **PowerShell `-o $null` 不会真的丢弃 curl 输出**：`$null` 在 PowerShell 里是变量值"空"，传给 native exe 时转成空字符串，于是 curl 看到 `-o ""` 把响应写到当前目录的一个空文件名……结果 `-w` 格式串不打印、body 反而打印到 stdout。要用 `NUL`（Windows 设备文件名）。
+   - **修法**：`curl.exe -s -o NUL -w '%{http_code}' <url>`
+   - 也别用 `Invoke-WebRequest` 测 4xx/5xx——见 Step 2.2 进度的同类坑记录。
+
+**给后续开发者的提示：**
+- **新增静态资源类型**：在 `backend/static/` 下加子目录即可（如 `static/avatars/`），无需改 mount 配置。`/static/avatars/<file>` 自动可访问。
+- **`static/cache/` 和 `static/uploads/` 已经 gitignore**：上传的用户手图、即梦合成的试戴结果图都进这两个目录。HTTP 可以读但 git 不追踪。
+- **演示前必须先跑 `seed_all.py`**：clone 仓库不会带 `static/styles/` 和 `static/samples/` 里的图（gitignore 了）。空目录访问 `/static/styles/f_01_enh.png` 会 404。
+- **不要在 main.py 之外再 `app.mount(...)`**：所有 mount 集中在 main.py 一处声明，避免分散到 routers/ 下导致 mount 顺序/优先级混乱。
+- **`StaticFiles(directory=path)` 路径要求**：`path` 必须**已经存在**，否则 FastAPI 启动就抛错。Step 0.1 已经把 `static/{styles,samples,uploads,cache}` 4 个子目录建好；如果有人手 rm 了某个子目录，mount 不影响（只挂顶层 static/），但访问该子目录会 404。
+
+**Phase 2 收官：** 后端基础设施 4 步全部就位（DB 注入 / 统一响应 / 路由骨架 / 静态挂载）。下一步进 Phase 3 AI 服务层（4 步：ImageGenProvider 抽象 / 即梦 P1 / LLM 封装 / 邮件发送）。Phase 3 完成后才进 Phase 4 真正的业务 API（用户端 7 个接口）。
+
+---
