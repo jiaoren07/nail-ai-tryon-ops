@@ -545,3 +545,46 @@ UUID（`user_id`）仍然走 `os.urandom`（uuid.uuid4 的底层），所以每�
 - **OpenAPI 文档不会显示 envelope**：因为 health 等接口没声明 response_model，Swagger 还是把 `Dict` 作为返回类型呈现成 `{additionalProp1: {}}`。这是 plan 接受的现状，不修；后续若需要可加 `class ApiEnvelope(BaseModel)` 模型并在每个路由 `response_model=ApiEnvelope[StyleListData]`，但会大幅增加样板代码。
 
 ---
+
+### ✅ Step 2.3 · 路由分组骨架 — 2026-06-10
+
+**做了什么：**
+- 新建 `backend/app/routers/__init__.py`（空，包标记）
+- 新建 `backend/app/routers/user.py`（33 行）：
+  - `router = APIRouter(prefix="/api")`，C 端路由统一容器
+  - `GET /ping` 探针返回 `{code:0, msg:"ok", data:{router:"user"}}`
+  - **docstring 把强约定写死**：所有 C 端接口（包括 `/api/styles`、`/api/recommend`、`/api/tryon` 等）都在本文件里加 `@router.<method>("<路径>")`，**禁止**未来新建 `styles.py` / `recommend.py` 等独立文件。文件名 `user.py` 是"C 端"代称，不是"仅 `/api/user/*` 路径"。
+  - 顺手把 Step 4.1 的 `X-User-Id` header 协议记在 docstring 里，提醒后续实现者
+- 新建 `backend/app/routers/ops.py`（21 行）：
+  - `router = APIRouter(prefix="/api/ops")`，B 端路由统一容器
+  - `GET /ping` 探针返回 `{...data:{router:"ops"}}`
+  - 同样的强约定 docstring
+- `main.py` 改动（+4 行）：
+  - 导入两个 router 模块：`from app.routers import ops as ops_router` / `from app.routers import user as user_router`
+  - `app.include_router(user_router.router)` + `app.include_router(ops_router.router)`
+
+**Step 2.3 验证（3/3 PASS）：**
+
+| 测试 | 输出 |
+|---|---|
+| `GET /api/ping` | HTTP 200 + `{"code":0,"msg":"ok","data":{"router":"user"}}` |
+| `GET /api/ops/ping` | HTTP 200 + `{"code":0,"msg":"ok","data":{"router":"ops"}}` |
+| `GET /api/health` 不破坏 | HTTP 200 + 与 Step 2.2 完全一致 |
+
+**ping 端点保留决定：**
+plan §2.3 原话"两个 ping 验证后删除（或保留也行，开发期无害）"。我选**保留**——理由：
+1. 每个就 3 行函数，体积可忽略
+2. 活体探针：未来某次 commit 误把 `include_router` 注释了，`curl /api/ping` 立刻暴露
+3. 加业务接口出 bug 时，先 ping 判断是"app 起不来" vs "具体接口挂了"
+4. plan 显式允许
+
+**导入风格选择（轻微但记下）：**
+用 `from app.routers import user as user_router` 后 `include_router(user_router.router)`，而不是 `from app.routers.user import router as user_router` 后 `include_router(user_router)`。前者让 import 名稳定指向"模块"，未来 Step 4.x 在 `user.py` 加 schemas / helpers / constants 时不需要改 main.py 的 import；后者更短但耦合到 `router` 这一具体导出名。
+
+**给后续开发者的提示：**
+- **看到 Phase 4 / 6 / 8 / 9 任何路由实现指令，思路只有一条**：C 端 → 直接在 `routers/user.py` 末尾加 `@router.<method>("<路径>")` 的函数；B 端 → 同理加到 `routers/ops.py`。**不要新建文件**。
+- **router 前缀已经定了**：`user.py` 是 `/api`，`ops.py` 是 `/api/ops`。所以写 `@router.post("/recommend")` 实际暴露成 `/api/recommend`；`@router.get("/overview")` 在 ops.py 里暴露成 `/api/ops/overview`。**不要在 @router 路径里重写 `/api` 前缀**，会变成 `/api/api/recommend`。
+- **共享逻辑（如统一鉴权依赖、shared queries）**：定义在 `routers/user.py` / `routers/ops.py` 文件内的辅助函数即可。如果跨两端都用，移到 `app/services/<X>.py`，让两边 import。**不要为了"DRY"在 routers/ 下加 helpers.py**——违反"路由都在两个文件里"的约定。
+- **Pydantic request/response 模型可以同文件**：未来 Step 4.2 的 `UploadResponse` 之类直接在 user.py 顶部 `class UploadResponse(BaseModel): ...`，紧贴使用它的路由。**不要拆 schemas.py**。
+
+---

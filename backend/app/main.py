@@ -11,6 +11,8 @@ from app.responses import (
     ok,
     unhandled_exception_handler,
 )
+from app.routers import ops as ops_router
+from app.routers import user as user_router
 
 
 @asynccontextmanager
@@ -31,6 +33,9 @@ app.add_middleware(
 
 app.add_exception_handler(HTTPException, http_exception_handler)
 app.add_exception_handler(Exception, unhandled_exception_handler)
+
+app.include_router(user_router.router)
+app.include_router(ops_router.router)
 
 
 @app.get("/api/health")
