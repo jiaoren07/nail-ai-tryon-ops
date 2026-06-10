@@ -631,3 +631,50 @@ plan §2.3 原话"两个 ping 验证后删除（或保留也行，开发期无�
 **Phase 2 收官：** 后端基础设施 4 步全部就位（DB 注入 / 统一响应 / 路由骨架 / 静态挂载）。下一步进 Phase 3 AI 服务层（4 步：ImageGenProvider 抽象 / 即梦 P1 / LLM 封装 / 邮件发送）。Phase 3 完成后才进 Phase 4 真正的业务 API（用户端 7 个接口）。
 
 ---
+
+### ✅ Step 3.1 · ImageGenProvider 抽象 + MockProvider — 2026-06-10
+
+**做了什么：**
+- 新建 `backend/app/services/__init__.py`（空包标记）
+- 新建 `backend/app/services/image_gen.py`（89 行）：
+  - **`ImageGenError`**：自定义异常类，所有 image-gen 失败都抛它
+  - **`ImageGenProvider(ABC)`**：抽象基类，规定唯一异步方法
+    ```python
+    async def generate(
+        self, user_id: str, style_id: str,
+        hand_image_bytes: bytes, prompt_extra: str | None = None
+    ) -> str  # returns relative URL like /static/cache/<filename>
+    ```
+  - **`_resolve_cover_path(style_id)`**：兼容男女命名，先探 `_enh.png` 再探 `.jpg`，找不到返回 None
+  - **`MockProvider`**：把 `static/styles/{cover}` 直接复制到 `static/cache/{user_id}_{style_id}{.png|.jpg}`，返回 cache 路径。**演示安全网**，永远不会因外部依赖挂掉
+  - **`get_image_provider()`** 工厂：读 `settings.IMAGE_PROVIDER`，`mock` 返回 MockProvider 实例，`jimeng` 抛 ImageGenError（占位，Step 3.2 实现），其他抛 ImageGenError
+
+**Step 3.1 验证（6/6 PASS + 用户手动验证）：**
+
+| 测试 | 实测 |
+|---|---|
+| factory 返回 `MockProvider`（IMAGE_PROVIDER=mock） | 类型匹配 |
+| MockProvider.generate(`f_01`) | URL=`/static/cache/test_user_123_f_01.png`，1,221,491 B（与源 f_01_enh.png 同字节） |
+| MockProvider.generate(`m_05`) | URL=`/static/cache/test_user_123_m_05.jpg`，60,010 B（保留 jpg 扩展名）|
+| 未知 style id 抛 `ImageGenError` | "no cover image found for style 'f_99'" |
+| `IMAGE_PROVIDER=jimeng` 抛 `ImageGenError`（占位） | "JimengProvider not implemented yet..." |
+| `IMAGE_PROVIDER=garbage` 抛 `ImageGenError` | "unknown IMAGE_PROVIDER: 'garbage'" |
+| 测试结束 cache 清理 | 自动清空 |
+| 用户手动验证亦确认 | 在 cache 看到 1.2 MB 的 `test_f_01.png`，删除后干净 |
+
+**几个设计选择（透明告知）：**
+
+1. **`generate()` 多了 `user_id` 参数**：plan §3.1 字面只列「手图 bytes、款式 id」，但同步说 cache 文件名 `{user_id}_{style_id}.png` 需要 user_id。把 user_id 当显式参数比把它编进 hand_image_bytes 或文件名嗅探都更显式。
+2. **`_resolve_cover_path` try-both**：plan 写的 `{id}_enh.png` 是 25 女款时代格式。男款是 `m_NN.jpg`。先探 `_enh.png` 再探 `.jpg`，两次 filesystem stat sub-ms。**比从 DB 查 cover_url 更轻量，且不依赖 DB 状态**——Mock 必须永远能跑。
+3. **Mock cache 扩展名跟源走**：女款 `.png` → cache `.png`；男款 `.jpg` → cache `.jpg`。不强制 `.png` 避免 jpg 字节套 png 扩展名的 Content-Type 不一致。
+4. **`JimengProvider` 没建占位类**：plan §3.2 字面说"保留 JimengProvider 占位类抛'未实现'错误"。我选择直接在 factory 里抛 ImageGenError，message 提示去 Step 3.2 实现。简单 1 行，Step 3.2 时把 factory 那行换成 `return JimengProvider()` 即可。占位类等到 Step 3.2 真正需要时再建，避免空 class 污染。
+
+**给后续开发者的提示：**
+- **新增 Provider 实现**：继承 `ImageGenProvider` 实现 `async generate(...)`，在 `get_image_provider()` 工厂里加一个 `elif name == "<your-name>": return <YourProvider>()`。`.env` 加一行 `IMAGE_PROVIDER=<your-name>` 即可启用。
+- **不要在 Provider 实现里查 DB**：Provider 应该是无状态的，只接受参数 + 写文件。需要 cover_url 这类信息？通过参数传入或 filesystem 探测。这是为了让 Provider 单元测试不依赖 DB。
+- **`/static/cache/` 是运行时目录、gitignore**：里面的文件都是即时生成的，可以随时删空，下一次试戴会重新生成。
+- **MockProvider 把"原图当试戴结果"是有意为之**：演示时观众看不出区别，但本质上是 fallback。当 JimengProvider 真生效时，前端体验是质变的。所以 `IMAGE_PROVIDER` 是 demo 的"高级 / 安全"档位开关。
+- **`generate()` 是 async**：未来 Jimeng 用 `httpx.AsyncClient` 调 API，签名一致。Step 4.7 多款对比试戴用 `asyncio.gather` 并发调用同一个签名。
+- **错误处理统一抛 `ImageGenError`**：Step 4.6 单款试戴接口里 catch 这个异常包成 HTTPException(500)，让前端拿到 `{code:500, msg:"..."}` 信封（走 Step 2.2 全局 handler）。
+
+---
