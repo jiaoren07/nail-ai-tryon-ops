@@ -122,9 +122,9 @@
 | 后端框架 | FastAPI | 0.110+ | 自动生成 OpenAPI 文档，类型注解友好，async 原生 |
 | ORM | SQLAlchemy 2.0 + SQLite | - | 零部署，演示场景足够；生产可平滑迁 PostgreSQL |
 | 异步任务 | asyncio + asyncio.gather | - | 多款并行试戴用 gather 即可，无需引入 Celery |
-| 图像生成 | 即梦 AI（字节）+ Replicate 备选 | API | 国内访问稳定；Replicate 提供 ControlNet 备选保细节 |
-| LLM 推荐理由 | 通义千问 qwen-turbo | API | 短文本生成成本低、速度快 |
-| LLM 日报/对话 | 通义千问 qwen-max | API | 复杂推理与 Function Calling 用更强模型 |
+| 图像生成 | Seedream 4.5（PPIO 平台，字节系图像模型）+ Mock 兜底 | API | 多图条件输入（手图 + 款式图）；走 PPIO 共用 `PPIO_API_KEY`；Mock 永远兜底 |
+| LLM 推荐理由 | PPIO `qwen/qwen2.5-7b-instruct` | API | 短文本生成成本低、速度快 |
+| LLM 日报/对话 | PPIO `deepseek/deepseek-v3.1` | API | 复杂推理与 Function Calling 用更强模型 |
 | 手部识别 | MediaPipe Hands (JS or Python) | - | 浏览器侧/服务端均可跑，无需 GPU，关键点准确 |
 
 ### 3.2 为什么是云端 API 而非本地模型
@@ -858,25 +858,28 @@ function NotificationBell() {
 ```python
 class ImageGenProvider(ABC):
     @abstractmethod
-    async def generate(self, hand_img: bytes, style_ref: bytes, prompt: str) -> bytes: ...
+    async def generate(self, user_id, style_id, hand_image_bytes, prompt_extra=None) -> str: ...
 
-class JimengProvider(ImageGenProvider): ...
-class ReplicateProvider(ImageGenProvider): ...
+class SeedreamProvider(ImageGenProvider):
+    """走 PPIO 的 Seedream 4.5，把 user_id+style_id+hand_bytes 转换为
+    /static/cache/seedream_<...>.png 的相对 URL。"""
+
 class MockProvider(ImageGenProvider):
-    """降级方案：返回预生成图 + 简单叠加"""
+    """降级方案：把款式封面直接复制到 /static/cache/ 作为'试戴结果'。
+    永远不依赖外部 API，演示安全网。"""
 ```
 
-通过环境变量 `IMAGE_PROVIDER=jimeng|replicate|mock` 切换。Mock 在 API 不可用或开发联调时启用。
+通过环境变量 `IMAGE_PROVIDER=mock|seedream` 切换。Mock 是默认值，在 API 不可用或开发联调时永远兜底。详细决策依据见 progress.md Step 3.2（曾对比 Seedream 4.0/4.5/5.0-lite + Qwen-Image-Edit）。
 
 ### 8.2 推荐场景的 API 选择
 
 | 场景 | 选用 API | 理由 |
 |---|---|---|
-| 试戴图像生成 | 即梦 AI（字节）API | 国内访问稳定、中文 prompt 友好、按次计费 |
-| 试戴备选 | Replicate `lucataco/sdxl-controlnet` | 海外网络可用，ControlNet 保手部细节 |
-| 推荐理由（短文本，9×次/请求） | 通义千问 `qwen-turbo` | 便宜、快，单次几十 token 足够 |
-| AI 日报 / 周报（长结构化） | 通义千问 `qwen-max` | 复杂指令遵循、结构化输出更稳 |
-| AI 助手 Function Calling | 通义千问 `qwen-max` | 工具调用能力成熟 |
+| 试戴图像生成 | **Seedream 4.5**（PPIO 平台） | 多图条件输入（手图 + 款式图作两个参考）+ 肤色保真度高 + 走 PPIO 共用 key（~¥0.2/张） |
+| 试戴兜底 | MockProvider（复制款式封面）| 无外部依赖、永远能跑，演示安全网 |
+| 推荐理由（短文本，9×次/请求） | PPIO `qwen/qwen2.5-7b-instruct` | 便宜、快，单次几十 token 足够 |
+| AI 日报 / 周报（长结构化） | PPIO `deepseek/deepseek-v3.1` | 复杂指令遵循、结构化输出更稳 |
+| AI 助手 Function Calling | PPIO `deepseek/deepseek-v3.1` | 工具调用能力成熟 |
 | 手部检测/关键点 | MediaPipe Hands（本地） | 浏览器即可跑，零调用成本 |
 | 邮件推送 | Python `smtplib`（标准库）+ `markdown` | 零外部依赖，QQ/163 SMTPS 465 端口稳定 |
 | 站内信 | 本地 DB + 5 秒前端轮询 | 演示场景轮询足够，无需 WebSocket |

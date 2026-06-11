@@ -678,3 +678,78 @@ plan §2.3 原话"两个 ping 验证后删除（或保留也行，开发期无�
 - **错误处理统一抛 `ImageGenError`**：Step 4.6 单款试戴接口里 catch 这个异常包成 HTTPException(500)，让前端拿到 `{code:500, msg:"..."}` 信封（走 Step 2.2 全局 handler）。
 
 ---
+
+### ✅ Step 3.2 · SeedreamProvider 接入（PPIO 平台）— 2026-06-11
+
+**与原 plan 的方向修订：**
+plan §3.2 原本写"即梦 AI（火山方舟）"，要求注册火山方舟实名拿独立 key。Benchmark 后发现 **PPIO 平台自带 Seedream 系列**（字节系图像模型）：
+- 共用 `PPIO_API_KEY`（已就绪），不用再注册一个供应商
+- Seedream 4.5 在多图条件输入和肤色保真两方面都优于火山方舟即梦的常规图生图
+- 火山方舟即梦原本就只是字节系图像能力的一种发行渠道——PPIO 上的 Seedream 同源
+
+3 份 docu 已同步修订（design-docu §3.1/§8.1/§8.2、tech-stack §1/§4/§7.3/§9/附录、implementation-plan §0.4/§3.2/§10.2 + memory-bank 镜像三对 SHA 匹配）。
+
+**做了什么：**
+- `backend/app/services/image_gen.py` 新增 `SeedreamProvider`：
+  - Endpoint `https://api.ppio.com/v3/seedream-4.5`，timeout 180s，下载超时 60s
+  - 把 `hand_image_bytes` + 从 `_resolve_cover_path(style_id)` 找到的款式封面同时 base64 data-URL 化，塞进 `image` 数组字段
+  - Prompt 锁定 V1 短版（短而有效，V2 加长版没有可测量收益）
+  - `size: "2K"` + `watermark: false`
+  - 文件名 `seedream_{user_id}_{style_id}_{ts}.png`，毫秒时间戳后缀避免重试覆盖
+  - HTTP 4xx/5xx 全部包成 `ImageGenError` 抛出（不重试——交给调用方决定是否退回 MockProvider）
+- `get_image_provider()` factory：`IMAGE_PROVIDER=seedream` 返回 `SeedreamProvider`；`mock` 返回 `MockProvider`；其他抛 `ImageGenError`
+- 配置精简：删除 `JIMENG_API_KEY` 字段（已废弃）—— `backend/.env` / `.env.example` / `app/config.py` 三处同步删除；`IMAGE_PROVIDER` 注释改为标注 `mock | seedream` 两个合法值
+
+**Step 3.2 验证（端到端 / 真 API 调用 / 用户人工确认）：**
+
+| 验证 | 实测 |
+|---|---|
+| `IMAGE_PROVIDER=seedream` 工厂返回 `SeedreamProvider` 实例 | ✅ |
+| 真实 API 调用（hand=05.png + style=f_01）耗时 | 54.1s（符合 40-60s 预期）|
+| 返回 URL 格式 `/static/cache/seedream_<user>_<style>_<ts>.png` | ✅ `seedream_step3_2_test_f_01_1781172792076.png` |
+| cache 文件实际生成 | 914 KB，正常体量 |
+| 视觉效果与之前 benchmark V1 一致 | ✅ 肤色保真、手部结构保留、指甲款式还原 |
+| MockProvider 不受影响 | ✅ |
+| 未知 `IMAGE_PROVIDER` 值抛 `ImageGenError` | ✅ "unknown IMAGE_PROVIDER: 'garbage'; valid: mock, seedream" |
+
+**模型选择过程（透明、不光彩的部分）：**
+
+我中间踩了一个判断陷阱：第一轮 benchmark 跑完 Seedream 4.0/4.5/5.0-lite 后，**我把肤色对比方向看反了**。
+
+- 真实情况：原图 `samples/05.png` 是中深色暖棕肤色；4.0 把它推向冷深黑（去暖色底色），4.5 接近原图，5.0-lite 直接被安全过滤拒了
+- 我的错误描述："4.0 保留深色 ✓ / 4.5 美白 ✗"——把 4.0 的"更深"误读成"保留"，把 4.5 的"接近原图"误读成"美白"
+- 用户基于自己看图的直觉直接选了 4.5（这才是对的）
+- 我又走了弯路：建议加 V2 加强 prompt 反美白 bias（其实根本没那个 bias）、又跑 Qwen-Image-Edit 探索（弄清它只接受单张图，多图条件不可能）
+- 总共烧了约 **¥0.945**（Seedream 4.0/4.5/5.0-lite 3 张 + 4.5 V2 1 张 + Qwen 探索 1 次 + Step 3.2 验证 1 次）。其中至少 ¥0.345 是我误判带出来的浪费
+
+**教训记下来**：Read 工具看图的颗粒度不如肉眼直接看，用户的视觉判断是更可靠的信号源。下次类似分歧应该先承认用户视觉判断的优先权，而不是反过来让用户被我的错误描述带偏。
+
+**最终锁定的选择：**
+
+| 维度 | 选定 | 理由 |
+|---|---|---|
+| 平台 | PPIO | 共用 `PPIO_API_KEY`，跟 LLM 同供应商 |
+| 模型 | Seedream 4.5 | 肤色保真度最佳；4.0 over-darken / 5.0-lite 拒深色手 / Qwen 只接单图 |
+| Prompt | V1 短版 | V2 加狠的 prompt 实测没有可观察改善，**只是 token 多 + 难维护** |
+| 输出分辨率 | 2K | demo 显示不到 4K，省时间 |
+| watermark | false | 我们把结果当"用户自己的试戴"展示，不需要 AI 水印 |
+
+**已知限制（写进 docu）：**
+- **5.0-lite 对深色皮肤手图触发安全过滤**：这是模型 bias，不是 prompt 能修。如果未来发现 4.5 对某些用户也触发了，需考虑切 4.0
+- **4.0 对深色手图 over-darken**：保留深色但加深一档，失去原图暖色底色
+- **Qwen-Image-Edit 只接受单图输入**（API `image` 字段是 string 不是 array），用 Qwen 就意味着款式必须用文字描述喂模型，体验大幅下降，不适合本场景
+- 异步 API 的 task-result 查询端点 PPIO 文档没写清楚，未来如果有人想接异步模型（如视频生成）需要先实验
+
+**`backend/static/cache/bench/` 下保留了 3 张 benchmark 输出**（`bench_4_0_0.png`、`bench_4_5_0.png`、`bench_4_5_v2.png`）作为视觉参考，路径在 `.gitignore` 里不进 git。未来如果有人想重新评估模型可以直接打开看，省得重花钱跑。
+
+**给后续开发者的提示：**
+- **想看真合成效果**：把 `.env` 的 `IMAGE_PROVIDER` 从 `mock` 改 `seedream`，重启后端。一次试戴 ~¥0.2、~50s。
+- **想换 model 版本**（如试 4.0 / 5.0-lite）：改 `SeedreamProvider.ENDPOINT` 常量即可，不用动其他代码。如果新版本要不同的字段名（4.0 的 `images` vs 4.5/5.0-lite 的 `image`），需要同步改 payload 构建那两行
+- **想换 prompt**：改 `SeedreamProvider.PROMPT_TEMPLATE`。**改之前先看 benchmark 三张图作为基线**——任何 prompt 改动都应该比这个基线更好，否则别改
+- **`hand_image_bytes` 体积要控制**：Seedream 接受 ≤10MB/张。如果用户传大图，前端应在上传前先压缩（design-docu §6.2 用 `browser-image-compression` 压到 ≤5MB）
+- **失败重试策略**：当前没有内置重试。如果 PPIO 5xx 或网络抖动，单次 `generate()` 会抛 `ImageGenError`。Step 4.6 / 4.7（试戴接口）应在路由层 catch + 退回 MockProvider，让用户至少看到款式图作为"试戴结果"。这是 design-docu §8.1 "Mock 永远兜底"的精神
+- **`PPIO_API_KEY` 是核心凭证**：泄露了就立刻去 PPIO 控制台 revoke + 新建 key 换掉 `.env`。LLM + 图像生成 都靠它
+- **Step 4.6 / 4.7 实现细节**：拿到 `result_url`（`/static/cache/seedream_*.png`）后写入 `tryons.result_url` 列。文件名带 timestamp 保证唯一，DB 里同一 (user_id, style_id) 多次试戴指向不同文件
+- **演示前 dry-run 一次真合成**：避免现场被网络/审核拒第一次。先在前一天用真 key 跑一次确认链路通
+
+---

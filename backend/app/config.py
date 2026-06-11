@@ -12,8 +12,7 @@ class Settings(BaseSettings):
 
     DATABASE_URL: str
 
-    IMAGE_PROVIDER: str = "mock"
-    JIMENG_API_KEY: str = ""
+    IMAGE_PROVIDER: str = "mock"  # 'mock' (fallback, copies style cover) | 'seedream' (real AI via PPIO)
 
     PPIO_API_KEY: str = ""
     PPIO_BASE_URL: str = "https://api.ppio.com/openai"

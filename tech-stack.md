@@ -37,7 +37,7 @@
 | **HTTP 调用** | httpx | 0.27+ | 异步调用 AI API |
 | **定时任务** | APScheduler | 3.10+ | 进程内 cron 调度，无需 Redis/Celery |
 | **邮件发送** | smtplib（标准库）+ markdown | - | 零依赖，Markdown 自动转 HTML 邮件 |
-| **图像生成** | 即梦 AI (字节) | API | 国内访问稳定、中文 prompt 友好 |
+| **图像生成** | Seedream 4.5（PPIO） | API | 多图条件输入（手图 + 款式图作两个参考），共用 PPIO key，~¥0.2/张 |
 | **LLM 供应商** | PPIO 一家全包 | OpenAI 兼容 API | VLM/LLM 都已验证可用，省一个 dashscope 注册 |
 | **LLM (短文本)** | `qwen/qwen2.5-7b-instruct`（PPIO） | API | 推荐理由生成，9 条/请求，便宜快 |
 | **LLM (复杂)** | `deepseek/deepseek-v3.1`（PPIO） | API | 日报/周报/Function Calling，结构化输出稳 |
@@ -252,7 +252,7 @@ markdown==3.10.2           # Markdown 转 HTML（邮件正文）
 
 | 用途 | PPIO model ID | API 单价（参考） | 调用频率（演示） |
 |---|---|---|---|
-| 试戴图像生成 | 即梦 AI（字节火山方舟，**不走 PPIO**） | ~¥0.05–0.15/张 | 每次试戴 1 次 |
+| 试戴图像生成 | `seedream-4.5`（PPIO 平台，字节系图像模型） | ~¥0.2/张 | 每次试戴 1 次 |
 | 推荐理由生成 | `qwen/qwen2.5-7b-instruct` | ~¥0.002/千 token | 推荐时批量 9 条 |
 | 日报 / 周报生成 | `deepseek/deepseek-v3.1` | ~¥0.004/千 token | 每日 1 次 + 每周 1 次 |
 | AI 助手对话（Function Calling）| `deepseek/deepseek-v3.1` | ~¥0.004/千 token | 演示时 5–10 次 |
@@ -286,12 +286,13 @@ PRD 里的"肤色识别、手型分类"听起来很 AI，**演示场景完全可
 - deepseek-v3.1 在 Function Calling 与结构化 Markdown 输出方面表现稳，适合日报/周报和 AI 助手对话
 - 两个 model ID 都通过 `.env` 中的 `LLM_QUICK_MODEL` 和 `LLM_STRONG_MODEL` 暴露，必要时可热切换
 
-**为什么图像生成不用 Replicate？**
-- Replicate 海外，网络风险高
-- 即梦 AI（火山方舟）国内访问稳定，对中文 prompt 适配好
-- 如果即梦不可用，备选通义万相 API
+**为什么图像生成走 PPIO 的 Seedream 而非火山方舟即梦或其他？**
+- PPIO 提供 Seedream 4.0 / 4.5 / 5.0-lite，**和 LLM 共用同一个 `PPIO_API_KEY`**，省去单独注册火山方舟实名认证
+- Seedream 系列**支持多图条件输入**（手图 + 款式图同时喂进去作两个参考），其他文生图模型（即梦文生图 3.0/3.1、Qwen-Image 文生图）只能接受文字提示
+- benchmark 实测 Seedream 4.5 在肤色保真度上优于 4.0（4.0 over-darken）和 5.0-lite（对深色手图触发安全过滤拒绝）；同时优于 Qwen-Image-Edit（只接受单张输入图，无法把款式作为视觉参考）
+- 详细对比依据见 progress.md Step 3.2
 
-**降级最终保底**：所有 AI 调用都包一层 `MockProvider`，无网络时返回预生成好的素材。
+**降级最终保底**：所有 AI 调用都包一层 `MockProvider`，无网络/无 key 时返回款式封面复制图作为试戴结果，演示链路不中断。
 
 ### 4.4 抽象层代码骨架
 
@@ -302,26 +303,27 @@ from app.config import settings
 
 class ImageGenProvider(ABC):
     @abstractmethod
-    async def generate(self, hand_img: bytes, style_id: str, prompt: str) -> str: ...
+    async def generate(
+        self, user_id: str, style_id: str,
+        hand_image_bytes: bytes, prompt_extra: str | None = None,
+    ) -> str: ...
 
-class JimengProvider(ImageGenProvider):
-    async def generate(self, hand_img, style_id, prompt):
-        # 调用即梦 AI API
-        ...
+class SeedreamProvider(ImageGenProvider):
+    """走 PPIO 的 Seedream 4.5：用户手图 + 款式封面作两个 reference，
+    生成结果存到 /static/cache/seedream_<...>.png，返回相对 URL。"""
 
 class MockProvider(ImageGenProvider):
-    """降级：返回预生成图"""
-    async def generate(self, hand_img, style_id, prompt):
-        return f"/static/mocks/tryon_{style_id}.jpg"
+    """降级：把款式封面直接复制到 /static/cache/ 当试戴结果。
+    永远能跑，不依赖任何外部 API。"""
 
-def get_provider() -> ImageGenProvider:
-    return {
-        "jimeng": JimengProvider(),
-        "mock": MockProvider(),
-    }[settings.IMAGE_PROVIDER]
+def get_image_provider() -> ImageGenProvider:
+    name = settings.IMAGE_PROVIDER.lower()
+    if name == "mock": return MockProvider()
+    if name == "seedream": return SeedreamProvider()
+    raise ImageGenError(f"unknown IMAGE_PROVIDER: {name!r}")
 ```
 
-通过环境变量切换：`IMAGE_PROVIDER=mock` 即可关闭真实 API 调用。
+通过环境变量切换：`IMAGE_PROVIDER=mock`（默认）/ `IMAGE_PROVIDER=seedream`（真合成）。Mock 是兜底，永远可用。
 
 ---
 
@@ -595,9 +597,8 @@ pnpm dev                            # 默认 5173 端口
 
 ```bash
 # backend/.env
-IMAGE_PROVIDER=jimeng                       # 或 mock
-JIMENG_API_KEY=xxx
-PPIO_API_KEY=sk_xxx                         # 全部 LLM/VLM 共用
+IMAGE_PROVIDER=mock                         # mock（默认，复制款式封面）/ seedream（PPIO 真合成）
+PPIO_API_KEY=sk_xxx                         # 全部 LLM/VLM/图像生成 共用
 PPIO_BASE_URL=https://api.ppio.com/openai
 LLM_QUICK_MODEL=qwen/qwen2.5-7b-instruct    # 短文本（推荐理由）
 LLM_STRONG_MODEL=deepseek/deepseek-v3.1     # 复杂（日报、Function Calling）
@@ -647,7 +648,7 @@ SCHEDULER_ENABLED=true
 |---|---|---|
 | D1 上午 | 项目骨架 + 数据库表 + seed 脚本 | 项目骨架 + 路由 + UI 库接入 |
 | D1 下午 | 用户端基础接口（styles、recommend、tryon） | L0 双端入口 + U0 性别 + U1 上传页面 |
-| D2 | AI 服务接入（即梦 + 通义） | U2 智能推荐页（核心差异化） |
+| D2 | AI 服务接入（Seedream 图像 + PPIO LLM） | U2 智能推荐页（核心差异化） |
 | D3 | 运营端接口（overview、trending、cold） | U4 多款对比试戴（核心差异化） |
 | D4 | AI 日报 + Function Calling 助手 | 运营端 O1–O4 看板 |
 | D5 | 联调 + 降级开关 + 演示数据微调 | 联调 + 走查 + 演示彩排 |
@@ -690,7 +691,7 @@ pnpm dlx tailwindcss init -p
 | 后端语言 | Python / Node.js / Go | **Python** | AI API SDK 最全 |
 | 后端框架 | FastAPI / Flask / Django | **FastAPI** | async + 自动文档 |
 | 数据库 | SQLite / MySQL / PostgreSQL | **SQLite** | 零部署 |
-| 图像生成 | 即梦 / 通义万相 / Replicate / 本地 SD | **即梦（主）+ Mock（降级）** | 国内稳定 + 兜底安全 |
+| 图像生成 | Seedream 4.0/4.5/5.0-lite / 即梦文生图 / Qwen-Image-Edit / 火山方舟即梦 | **Seedream 4.5（PPIO）+ Mock（降级）** | 多图条件输入 + 肤色保真 + 共用 PPIO key（实测对比详情见 progress.md Step 3.2）|
 | LLM 供应商 | dashscope / PPIO / 直连各厂 | **PPIO 一家全包** | OpenAI 兼容、模型库全、单 key 跑完整链路 |
 | LLM 模型选 | qwen / DeepSeek / GLM / Claude | **qwen2.5-7b（短）+ deepseek-v3.1（强）** | 速度/价格/Function Calling 综合最优 |
 | 手部分析 | MediaPipe / OpenCV / 云端 API / Mock | **Mock** | 演示无感，省 2 天 |

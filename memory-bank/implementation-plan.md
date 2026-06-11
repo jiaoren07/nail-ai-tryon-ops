@@ -93,9 +93,8 @@
 **指令**：
 - 在 `backend/` 下创建 `.env`，写入下列变量（值用占位符或真实值，缺失项暂用空字符串）：
   - `DATABASE_URL` — 指向 `backend/nail_demo.db` 的 SQLite aiosqlite URL
-  - `IMAGE_PROVIDER` — 默认值 `mock`
-  - `JIMENG_API_KEY` — 留空
-  - `PPIO_API_KEY` 与 `PPIO_BASE_URL`（值固定为 `https://api.ppio.com/openai`）— **全部 LLM 与 VLM 共用一个供应商**
+  - `IMAGE_PROVIDER` — 默认值 `mock`；可选 `seedream`（走 PPIO 的 Seedream 4.5 真实合成）
+  - `PPIO_API_KEY` 与 `PPIO_BASE_URL`（值固定为 `https://api.ppio.com/openai`）— **全部 LLM / VLM / 图像生成共用一个供应商**
   - `LLM_QUICK_MODEL` — 短文本生成模型 ID，默认 `qwen/qwen2.5-7b-instruct`
   - `LLM_STRONG_MODEL` — 复杂推理 / Function Calling 模型 ID，默认 `deepseek/deepseek-v3.1`
   - SMTP 五项：`SMTP_HOST`、`SMTP_PORT`、`SMTP_USER`、`SMTP_PASS`、`SMTP_FROM`
@@ -346,21 +345,23 @@
 
 ---
 
-### Step 3.2 · 即梦 AI Provider 接入（可选 P1）
+### Step 3.2 · Seedream Provider 接入（PPIO 平台，可选 P1）
 
-**目标**：实现真实的 `JimengProvider`，作为 MockProvider 之外的可选实现。
+> 计划修订 2026-06-11：原 plan 写的是"即梦 AI（火山方舟）"，benchmark 后发现 PPIO 平台上 Seedream 4.5 更优——多图条件输入 + 肤色保真度 + 共用 PPIO key。详见 progress.md Step 3.2 的对比记录。
+
+**目标**：实现真实的 `SeedreamProvider`，作为 MockProvider 之外的可选实现。
 
 **指令**：
-- 实现 `JimengProvider` 类，按即梦 AI 官方 API 文档（火山方舟）调用图生图接口。
-- 输入用户手图 + 款式参考图（从 `static/styles/{id}_enh.png` 读取作为 reference）+ 固定 prompt（参考 [design-docu.md §8.3](design-docu.md)）。
-- 返回结果保存到 `backend/static/cache/jimeng_{uuid}.png`。
-- 超时设置 60 秒，超时或异常抛 `ImageGenError`（自定义异常）。
-- 通过 `.env` 中的 `JIMENG_API_KEY` 鉴权；key 为空时直接抛配置错误。
+- 实现 `SeedreamProvider` 类，调用 PPIO 的 `https://api.ppio.com/v3/seedream-4.5` 端点。
+- 输入用户手图 + 款式参考图（从 `_resolve_cover_path(style_id)` 兼容男女命名找到），两者都 base64 data URL 编码后塞进 `image` 数组字段；同时带固定 prompt（参考 [design-docu.md §8.3](design-docu.md)）。
+- 返回结果保存到 `backend/static/cache/seedream_{user_id}_{style_id}_{ts}.png`，时间戳后缀避免重试覆盖。
+- 超时设置 180 秒（Seedream 典型 40-60s），超时或异常抛 `ImageGenError`（自定义异常）。
+- 通过 `.env` 中的 `PPIO_API_KEY` 鉴权；key 为空时直接抛配置错误。
 
 **验证**：
-- 在 `.env` 临时设 `IMAGE_PROVIDER=jimeng` 且填入有效 key，写一次性测试：传任一示例手图 + `style_id=f_01`，应在 60 秒内返回 URL 且文件存在。
+- 在 `.env` 临时设 `IMAGE_PROVIDER=seedream`，写一次性测试：传任一示例手图 + `style_id=f_01`，应在 180 秒内返回 URL 且文件存在，size > 100 KB。
 - 测试完成后把 `IMAGE_PROVIDER` 改回 `mock`。
-- 如果 key 暂未拿到，本步可跳过，但需要在 `image_gen.py` 中**保留 `JimengProvider` 占位类**抛"未实现"错误。
+- 跳过条件：Mock 已经足够撑起整个数据闭环演示，Seedream 仅在需要"真合成"效果时启用。本步可作为产品质量提升项延后。
 
 ---
 
@@ -1057,7 +1058,7 @@
 **目标**：验证降级路径无副作用。
 
 **指令**：
-- 把 `.env` 的 `IMAGE_PROVIDER` 从 `mock` 改成 `jimeng`（若 JIMENG_API_KEY 有），重启后端。
+- 把 `.env` 的 `IMAGE_PROVIDER` 从 `mock` 改成 `seedream`（PPIO_API_KEY 已配置），重启后端。
 - 完成一次试戴。
 - 把 `.env` 改回 `mock`，重启后端。
 - 完成一次试戴。
