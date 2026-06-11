@@ -95,8 +95,8 @@
   - `DATABASE_URL` — 指向 `backend/nail_demo.db` 的 SQLite aiosqlite URL
   - `IMAGE_PROVIDER` — 默认值 `mock`；可选 `seedream`（走 PPIO 的 Seedream 4.5 真实合成）
   - `PPIO_API_KEY` 与 `PPIO_BASE_URL`（值固定为 `https://api.ppio.com/openai`）— **全部 LLM / VLM / 图像生成共用一个供应商**
-  - `LLM_QUICK_MODEL` — 短文本生成模型 ID，默认 `qwen/qwen2.5-7b-instruct`
-  - `LLM_STRONG_MODEL` — 复杂推理 / Function Calling 模型 ID，默认 `deepseek/deepseek-v3.1`
+  - `LLM_QUICK_MODEL` — 短文本生成模型 ID，默认 `qwen/qwen3-next-80b-a3b-instruct`
+  - `LLM_STRONG_MODEL` — 复杂推理 / Function Calling 模型 ID，默认 `deepseek/deepseek-v4-pro`
   - SMTP 五项：`SMTP_HOST`、`SMTP_PORT`、`SMTP_USER`、`SMTP_PASS`、`SMTP_FROM`
   - `REPORT_RECIPIENT` — 报告收件邮箱
   - `SCHEDULER_ENABLED` — 默认 `true`

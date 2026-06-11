@@ -753,3 +753,65 @@ plan §3.2 原本写"即梦 AI（火山方舟）"，要求注册火山方舟实�
 - **演示前 dry-run 一次真合成**：避免现场被网络/审核拒第一次。先在前一天用真 key 跑一次确认链路通
 
 ---
+
+### ✅ Step 3.3 · LLM 服务封装（PPIO 一家全包）— 2026-06-11
+
+**做了什么：**
+- 新建 `backend/app/services/llm.py`：
+  - 用 `openai.AsyncOpenAI` 客户端，`api_key=settings.PPIO_API_KEY`、`base_url=settings.PPIO_BASE_URL`
+  - 异常类：`ConfigError`（key 缺失）、`LLMError`（重试后仍失败 / 非 429 错误）
+  - `gen_text(prompt, model: 'quick'|'strong'='quick', max_tokens=200)` — 短文本生成
+  - `gen_text_with_tools(messages, tools, model='strong')` — Function Calling，返回 `ChatCompletionMessage`（带 `.content` 和 `.tool_calls`）
+  - `_with_retry`：429 时指数退避（`2**attempt + random.uniform(0, 2)`，最多 3 次），跟 `data-prep/auto_tag_styles.py` 保持一致；其他错误立即抛 `LLMError`
+  - `PPIO_API_KEY` 为空时 `ConfigError`，**不做静默 fallback**
+
+**Model ID 大调整（透明记录）：**
+benchmark 时发现原 `.env` 写的 model ID 在 PPIO 实际不可用 / 不合理：
+
+| 维度 | 原（Step 0.4 时写的） | 现锁定 |
+|---|---|---|
+| Quick | `qwen/qwen2.5-7b-instruct` | `qwen/qwen3-next-80b-a3b-instruct`（80B MoE，激活 3B）|
+| Strong | `deepseek/deepseek-v3.1` | `deepseek/deepseek-v4-pro` |
+
+原因：
+- **`qwen/qwen2.5-7b-instruct` 已被 PPIO 下线**：实际调用返回 HTTP 500 `MODEL_NOT_AVAILABLE`，但 `/v1/models` 列表里没清理掉所以看着像还活着——经典"listing stale"。同探的 `qwen2.5-32b-instruct`、`qwen3-30b-a3b-fp8` 等多个也是 500。最终探出 `qwen/qwen3-next-80b-a3b-instruct` 实测 1.9s 响应，跟 `kimi-k2-instruct` / `qwen3-235b-a22b-instruct-2507` 三选一，选 next-80b 因为 MoE 激活小、推理便宜
+- **用户主动指定换 `deepseek-v4-pro`**：旗舰版本，1M context window，支持 Function Calling 和 reasoning。benchmark FC 实测 1.8-6.1s（首次 cold-start 偶发 30s+ 超时，多次重试稳定后正常）
+
+**Quick / Strong 跑了 7 个 strong 候选 Function Calling speed benchmark：**
+
+| 模型 | FC 时间 | 备注 |
+|---|---|---|
+| `qwen/qwen3-235b-a22b-instruct-2507` | 0.8s | 最快 |
+| `deepseek/deepseek-v3-turbo` | 1.5s | 速度专精 |
+| `moonshotai/kimi-k2-instruct` | 1.8s | 不同厂家 |
+| `qwen/qwen3.7-max` | 1.8s | qwen3 旗舰 |
+| `deepseek/deepseek-v4-flash` | 1.9-3.8s | v4 速度版，三轮稳定 |
+| `deepseek/deepseek-v3.1` | 2.4s | 原 plan 默认 |
+| **`deepseek/deepseek-v4-pro`** | **1.8-6.1s** | **用户选定** |
+
+**TIMEOUT 调整：plan §3.3 写 30s，调到 60s**
+理由：v4-pro 是 reasoning 模型，cold-start / Function Calling 首次组合可能 30s+。60s 给充足 margin 应付偶发慢响应，但仍能在合理时间内暴露真实失败（不会让长 hang 永久无法察觉）。Quick 档实测 3-4s 远低于 60s，没影响。
+
+**Step 3.3 验证（4/4 PASS）：**
+
+| 验证项 | 实测 |
+|---|---|
+| `gen_text("请用一句话介绍美甲", "quick", 80)` < 10s 返回非空 | 3.83s, "美甲是指通过修剪、打磨、涂色、装饰等方式..." |
+| `gen_text_with_tools(get_weather)` 返回 tool_calls | 4.29s, `tool_calls=[get_weather({"city": "上海"})]` |
+| `PPIO_API_KEY` 空时抛 `ConfigError` | "PPIO_API_KEY missing" |
+| 未知 tier 抛 `ValueError` | "unknown model tier: 'garbage'; use 'quick' or 'strong'" |
+
+**附带改动：**
+- `backend/.env`：`PPIO_API_KEY` 轮换为新 key（用户在对话里贴出新 key 时主动提供）；`LLM_QUICK_MODEL` / `LLM_STRONG_MODEL` 锁定新值
+- `backend/.env.example`：同步 model ID 默认值
+- 三份 docu（design-docu §3.1/§7.7.3 代码块、tech-stack §1/§4.1/§4.3/§7.3/附录、implementation-plan §0.4）凡引用 `qwen2.5-7b-instruct` / `deepseek-v3.1` / `qwen-max` 全部更新为新 ID + 加一段"为什么这两个"的解释。memory-bank 镜像同步 SHA 一致。`memory-bank/progress.md` Step 0.4 历史记录里的 model ID 是历史快照，**不动**——它如实记录了那个时刻 `.env` 的内容
+
+**给后续开发者的提示：**
+- **PPIO model ID 不靠谱地容易腐烂**：写 `.env` 之前先 `python -c "from openai import AsyncOpenAI; ..."` 跑一个最小调用确认。listing 接口的 200 不等于 chat completions 能调用
+- **timeout 60s 是当前默认**：如果未来要支持 streaming（SSE），timeout 设定要重新评估；当前是同步 await，整个响应一次性返回
+- **重试只针对 429**：plan 显式要求只在 rate limit 时退避。timeout、5xx、4xx 全部立即抛 `LLMError`——上层（Step 4.5 推荐接口、Step 8 AI 助手）应该自己决定要不要 fallback 到模板理由 / 错误提示
+- **`gen_text_with_tools` 返回的是 SDK `ChatCompletionMessage`**，不是 dict。`.tool_calls` 是 `list[ChatCompletionMessageToolCall]` 或 `None`；每个 tool_call 有 `.id`、`.function.name`、`.function.arguments`（**string，不是 dict**——需要 `json.loads()` 解码）。Step 8.1 Function Calling 实现注意这点
+- **PPIO_API_KEY 又轮换了一次**：用户当时在对话里贴出新 key 才有 v4-pro 调用权限。下次轮换记得删旧 key，PPIO 控制台保留过多废 key 是泄漏风险。`.env` 不进 git 所以仓库历史里不会有 key 痕迹，但**对话历史可能有**，请用户自行评估
+- **deepseek-v4-pro 首次调用偶发慢**：演示前 5 分钟 dry-run 一次 strong 档 Function Calling 让模型 warm-up，再正式演示
+
+---

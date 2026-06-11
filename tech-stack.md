@@ -39,8 +39,8 @@
 | **邮件发送** | smtplib（标准库）+ markdown | - | 零依赖，Markdown 自动转 HTML 邮件 |
 | **图像生成** | Seedream 4.5（PPIO） | API | 多图条件输入（手图 + 款式图作两个参考），共用 PPIO key，~¥0.2/张 |
 | **LLM 供应商** | PPIO 一家全包 | OpenAI 兼容 API | VLM/LLM 都已验证可用，省一个 dashscope 注册 |
-| **LLM (短文本)** | `qwen/qwen2.5-7b-instruct`（PPIO） | API | 推荐理由生成，9 条/请求，便宜快 |
-| **LLM (复杂)** | `deepseek/deepseek-v3.1`（PPIO） | API | 日报/周报/Function Calling，结构化输出稳 |
+| **LLM (短文本)** | `qwen/qwen3-next-80b-a3b-instruct`（PPIO） | API | 推荐理由生成，9 条/请求，便宜快 |
+| **LLM (复杂)** | `deepseek/deepseek-v4-pro`（PPIO） | API | 日报/周报/Function Calling，结构化输出稳 |
 | **手部识别** | 手动 mock + 简单色彩分析 | - | 演示不需要真识别，直接预设几套特征 |
 | **包管理 (前)** | pnpm | 9.x | 比 npm 快，节省磁盘 |
 | **包管理 (后)** | uv 或 pip | uv 0.4+ | uv 安装快 10×，pip 兜底 |
@@ -253,9 +253,9 @@ markdown==3.10.2           # Markdown 转 HTML（邮件正文）
 | 用途 | PPIO model ID | API 单价（参考） | 调用频率（演示） |
 |---|---|---|---|
 | 试戴图像生成 | `seedream-4.5`（PPIO 平台，字节系图像模型） | ~¥0.2/张 | 每次试戴 1 次 |
-| 推荐理由生成 | `qwen/qwen2.5-7b-instruct` | ~¥0.002/千 token | 推荐时批量 9 条 |
-| 日报 / 周报生成 | `deepseek/deepseek-v3.1` | ~¥0.004/千 token | 每日 1 次 + 每周 1 次 |
-| AI 助手对话（Function Calling）| `deepseek/deepseek-v3.1` | ~¥0.004/千 token | 演示时 5–10 次 |
+| 推荐理由生成 | `qwen/qwen3-next-80b-a3b-instruct` | ~¥0.002/千 token | 推荐时批量 9 条 |
+| 日报 / 周报生成 | `deepseek/deepseek-v4-pro` | ~¥0.004/千 token | 每日 1 次 + 每周 1 次 |
+| AI 助手对话（Function Calling）| `deepseek/deepseek-v4-pro` | ~¥0.004/千 token | 演示时 5–10 次 |
 | 款式打标（一次性，已完成）| `qwen/qwen2.5-vl-72b-instruct` / `qwen/qwen3-vl-30b-a3b-instruct` | — | 40 次（一次性） |
 | 手部分析 | **不调用任何 AI** | — | mock |
 
@@ -281,9 +281,10 @@ PRD 里的"肤色识别、手型分类"听起来很 AI，**演示场景完全可
 - OpenAI 兼容 API（base URL `https://api.ppio.com/openai`），与 OpenAI SDK 直接对接，无需厂商专用 SDK
 - 单 key 走完所有 LLM/VLM 调用，配置最简
 
-**为什么短文本用 qwen2.5-7b、复杂任务用 deepseek-v3.1？**
-- qwen2.5-7b 推理速度快、单价极低，适合"推荐理由 9 条/请求"这种短输出场景
-- deepseek-v3.1 在 Function Calling 与结构化 Markdown 输出方面表现稳，适合日报/周报和 AI 助手对话
+**为什么短文本用 qwen3-next-80b、复杂任务用 deepseek-v4-pro？**
+- qwen3-next-80b-a3b-instruct 是 MoE 架构（80B 总参数，激活 3B），benchmark 实测 ~1.9-3.8s 响应，"推荐理由 9 条/请求"这种短输出场景跑得稳定
+- deepseek-v4-pro 是 DeepSeek 旗舰，Function Calling 1.8-6.1s 实测稳定（早期 cold-start 时偶尔 30s+ 超时是 PPIO 瞬时问题）；1M token context 对未来"周报拼一周数据让 AI 写综述"有天然优势
+- 模型 ID 通过 `.env` 中的 `LLM_QUICK_MODEL` 和 `LLM_STRONG_MODEL` 暴露，必要时可热切换。早期 plan 写过 `qwen/qwen2.5-7b-instruct` + `deepseek/deepseek-v3.1`，benchmark 发现 7b 已被 PPIO 下线、v3.1 仍可用但 v4-pro 更接近未来方向，故升级
 - 两个 model ID 都通过 `.env` 中的 `LLM_QUICK_MODEL` 和 `LLM_STRONG_MODEL` 暴露，必要时可热切换
 
 **为什么图像生成走 PPIO 的 Seedream 而非火山方舟即梦或其他？**
@@ -597,11 +598,11 @@ pnpm dev                            # 默认 5173 端口
 
 ```bash
 # backend/.env
-IMAGE_PROVIDER=mock                         # mock（默认，复制款式封面）/ seedream（PPIO 真合成）
-PPIO_API_KEY=sk_xxx                         # 全部 LLM/VLM/图像生成 共用
+IMAGE_PROVIDER=mock                                # mock（默认，复制款式封面）/ seedream（PPIO 真合成）
+PPIO_API_KEY=sk_xxx                                # 全部 LLM/VLM/图像生成 共用
 PPIO_BASE_URL=https://api.ppio.com/openai
-LLM_QUICK_MODEL=qwen/qwen2.5-7b-instruct    # 短文本（推荐理由）
-LLM_STRONG_MODEL=deepseek/deepseek-v3.1     # 复杂（日报、Function Calling）
+LLM_QUICK_MODEL=qwen/qwen3-next-80b-a3b-instruct   # 短文本（推荐理由）
+LLM_STRONG_MODEL=deepseek/deepseek-v4-pro          # 复杂（日报、Function Calling）
 DATABASE_URL=sqlite+aiosqlite:///./nail_demo.db
 
 # 邮件（用 QQ/163 都行）
@@ -693,7 +694,7 @@ pnpm dlx tailwindcss init -p
 | 数据库 | SQLite / MySQL / PostgreSQL | **SQLite** | 零部署 |
 | 图像生成 | Seedream 4.0/4.5/5.0-lite / 即梦文生图 / Qwen-Image-Edit / 火山方舟即梦 | **Seedream 4.5（PPIO）+ Mock（降级）** | 多图条件输入 + 肤色保真 + 共用 PPIO key（实测对比详情见 progress.md Step 3.2）|
 | LLM 供应商 | dashscope / PPIO / 直连各厂 | **PPIO 一家全包** | OpenAI 兼容、模型库全、单 key 跑完整链路 |
-| LLM 模型选 | qwen / DeepSeek / GLM / Claude | **qwen2.5-7b（短）+ deepseek-v3.1（强）** | 速度/价格/Function Calling 综合最优 |
+| LLM 模型选 | qwen / DeepSeek / GLM / Claude | **qwen3-next-80b-a3b-instruct（短）+ deepseek-v4-pro（强）** | benchmark 实测 1-6s 响应稳定，FC 支持成熟 |
 | 手部分析 | MediaPipe / OpenCV / 云端 API / Mock | **Mock** | 演示无感，省 2 天 |
 | 并发任务 | Celery / asyncio / 同步 | **asyncio** | 演示足够 |
 | 定时任务 | Celery beat / 系统 cron / APScheduler | **APScheduler** | 进程内调度，零外部依赖 |

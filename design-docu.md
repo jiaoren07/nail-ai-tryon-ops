@@ -123,8 +123,8 @@
 | ORM | SQLAlchemy 2.0 + SQLite | - | 零部署，演示场景足够；生产可平滑迁 PostgreSQL |
 | 异步任务 | asyncio + asyncio.gather | - | 多款并行试戴用 gather 即可，无需引入 Celery |
 | 图像生成 | Seedream 4.5（PPIO 平台，字节系图像模型）+ Mock 兜底 | API | 多图条件输入（手图 + 款式图）；走 PPIO 共用 `PPIO_API_KEY`；Mock 永远兜底 |
-| LLM 推荐理由 | PPIO `qwen/qwen2.5-7b-instruct` | API | 短文本生成成本低、速度快 |
-| LLM 日报/对话 | PPIO `deepseek/deepseek-v3.1` | API | 复杂推理与 Function Calling 用更强模型 |
+| LLM 推荐理由 | PPIO `qwen/qwen3-next-80b-a3b-instruct` | API | 短文本生成成本低、速度快 |
+| LLM 日报/对话 | PPIO `deepseek/deepseek-v4-pro` | API | 复杂推理与 Function Calling 用更强模型 |
 | 手部识别 | MediaPipe Hands (JS or Python) | - | 浏览器侧/服务端均可跑，无需 GPU，关键点准确 |
 
 ### 3.2 为什么是云端 API 而非本地模型
@@ -732,7 +732,7 @@ async def generate_and_dispatch_report(report_type: str, source: str = "schedule
 
     # 2. LLM 生成 Markdown
     prompt = build_daily_prompt(stats) if report_type == "daily" else build_weekly_prompt(stats)
-    content_md = await llm.chat(prompt, model="qwen-max")
+    content_md = await llm.gen_text(prompt, model="strong", max_tokens=2000)
     title = build_title(report_type, period_start, period_end)
 
     # 3. 入库
@@ -877,9 +877,9 @@ class MockProvider(ImageGenProvider):
 |---|---|---|
 | 试戴图像生成 | **Seedream 4.5**（PPIO 平台） | 多图条件输入（手图 + 款式图作两个参考）+ 肤色保真度高 + 走 PPIO 共用 key（~¥0.2/张） |
 | 试戴兜底 | MockProvider（复制款式封面）| 无外部依赖、永远能跑，演示安全网 |
-| 推荐理由（短文本，9×次/请求） | PPIO `qwen/qwen2.5-7b-instruct` | 便宜、快，单次几十 token 足够 |
-| AI 日报 / 周报（长结构化） | PPIO `deepseek/deepseek-v3.1` | 复杂指令遵循、结构化输出更稳 |
-| AI 助手 Function Calling | PPIO `deepseek/deepseek-v3.1` | 工具调用能力成熟 |
+| 推荐理由（短文本，9×次/请求） | PPIO `qwen/qwen3-next-80b-a3b-instruct` | 便宜、快，单次几十 token 足够 |
+| AI 日报 / 周报（长结构化） | PPIO `deepseek/deepseek-v4-pro` | 复杂指令遵循、结构化输出更稳 |
+| AI 助手 Function Calling | PPIO `deepseek/deepseek-v4-pro` | 工具调用能力成熟 |
 | 手部检测/关键点 | MediaPipe Hands（本地） | 浏览器即可跑，零调用成本 |
 | 邮件推送 | Python `smtplib`（标准库）+ `markdown` | 零外部依赖，QQ/163 SMTPS 465 端口稳定 |
 | 站内信 | 本地 DB + 5 秒前端轮询 | 演示场景轮询足够，无需 WebSocket |
