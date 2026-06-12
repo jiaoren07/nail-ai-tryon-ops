@@ -863,37 +863,41 @@ benchmark 时发现原 `.env` 写的 model ID 在 PPIO 实际不可用 / 不合�
 
 ---
 
-### 📍 CHECKPOINT — 2026-06-12（用户第二次 /compact 之前，Phase 3 全部收官后）
+### 📌 项目锁定状态 + 公约提醒（无需每步更新，状态真变才改）
 
-**当前位置：**
-- ✅ Phase 0、Phase 1、Phase 2、**Phase 3 全部完成**
-- ✅ Phase 3 四步全过：3.1 (Mock) `fdb121d` / 3.2 (Seedream) `c554b23` / 3.3 (LLM) `9562680` / 3.4 (Email) `0f78249`
-- ⏭ **下一步**：**Step 4.1 X-User-Id header 约定 + 全局中间件**（Phase 4 用户端业务接口的起点）
-- 工作树干净，所有改动已 commit
+> 本段是**稳定的锁定状态指针**，不是 step-by-step 的进度条。
+>
+> - "下一步该做什么"——`git log -1` + `implementation-plan.md` 已经决定唯一答案，不在此处冗余维护
+> - "刚才完成了什么"——progress.md 的最新 Step 条目就是，不在此处复述
+> - 本段只记录**跨 Step 复用、不会从代码或 plan 自动推出来的项目级决策**
+>
+> **什么时候应该更新本段**：项目级 trade-off 真变了（换模型、换 provider、加新约定、轮换 secret）。**不是**：每完成一个 Step——那是 progress.md 的工作，本段不掺和。
 
-**Step 4.1 实施要点速查**（不展开，详见 [implementation-plan.md](../implementation-plan.md) §4.1）：
-- 不实现任何业务接口，只做 user_id / gender 前端约定 + 后端校验中间件
-- `routers/user.py` 顶部加 docstring 注释说明：`userId` 由前端生成 UUID v4 写 sessionStorage，每请求带 `X-User-Id` header；`gender` 由前端存 sessionStorage 在请求 body 显式带
-- `main.py` 加全局中间件：`/api/*` 路径（除 `/api/health`、`/docs`、`/openapi.json` 等系统路由）必须带 `X-User-Id` 且是合法 UUID 字符串，否则 `code=4xx, msg="invalid_user_id"`
-- 后端**不维护任何 session 表**
-- 验证：临时 `_debug/whoami` 路由返回 `data.user_id` — 不带 header 应被拒、带合法 UUID 返回该 UUID；验证完删调试路由
-- 大约 15-20 分钟可完成
+**AI 服务层锁定（Phase 3 出来的决策）：**
+- **IMAGE_PROVIDER**：默认 `mock`；切 `seedream` 走 PPIO 的 Seedream 4.5，V1 短 prompt 锁定。Step 3.2 benchmark 烧 ¥0.945 排除了 4.0 over-darken / 5.0-lite 拒深色 / Qwen-Image-Edit 单图 / V2 加狠 prompt 无效——细节查 progress.md Step 3.2
+- **LLM 双档**：quick = `qwen/qwen3-next-80b-a3b-instruct`（80B MoE 激活 3B），strong = `deepseek/deepseek-v4-pro`（1M context + FC）；`TIMEOUT_SECONDS=60`（plan 写 30 不够 reasoning 模型偶发慢）
+- **Email**：SMTPS via `smtplib.SMTP_SSL` 端口 465 + `asyncio.to_thread` 异步化；QQ `smtp.qq.com` 已实测通过；`wrap_html` 按 design-docu §7.7.4 包装（680px 宽 / Apple System / AI 助手脚注）
 
-**重要锁定状态（防被压缩丢失）：**
-- **IMAGE_PROVIDER 走向**：默认 `mock`；切 `seedream` 走 PPIO 的 Seedream 4.5，V1 短 prompt 锁定，加狠 prompt 没有可观察改善（Step 3.2 benchmark 烧了 ¥0.945 锁定的结论）
-- **LLM 双档**：quick = `qwen/qwen3-next-80b-a3b-instruct`，strong = `deepseek/deepseek-v4-pro`，timeout=60s 应付 reasoning 模型偶发慢
-- **Email**：SMTPS 走 `smtplib.SMTP_SSL` 端口 465，`asyncio.to_thread` 异步化，QQ smtp.qq.com 已实测通过；`wrap_html` 按 design-docu §7.7.4 包装（680px / Apple System / AI 助手脚注）
-- **PPIO key 轮换过 1 次**（Step 3.3 时用户贴新 key 换 v4-pro 权限）；旧 key 还有效，用户决定要不要再 revoke
-- **SMTP 授权码轮换过 1 次**（Step 3.4 时用户暴露旧码、立即在 QQ 控制台重生成、自己手改 `.env`，**AI 从不知道新码**）。建议作为后续 secret rotation 的默认流程
-- **演示数据**：`seed_all.py` 严格幂等（fixed seed=42），三次连跑 12847 tryons / 1432 stats
-- **原型图**：`原型1/` 下 10 张 Board_00~09，gitignored
-- **Phase 4 起点已就位**：所有 AI 服务层依赖都搭好了，业务接口可以开始放心写
+**演示数据状态（Phase 1 出来的决策）：**
+- `seed_all.py` 严格幂等：`random.seed(42)` 锁定，三次连跑都是 styles=40 / tryons=12847 / stats=1432
+- 原型图：`原型1/` 下 10 张 Board_00~Board_09，gitignored（Claude 工具资产同 `.claude/` 一起 gitignored）
 
-**给下一个会话（或 /compact 之后）的接续指南：**
-1. 读这一段 + Step 3.4 进度条 → 知道现在在哪
-2. 跑 `git log --oneline -10` → 看最近 commit 详情（最近是 `0f78249` Step 3.4）
-3. 用户说"继续 Step 4.1" → 直接进 §4.1，不需要回顾历史
-4. 用户说"问下之前为什么选 X" → 查对应 Step 的 progress 条目（每条都写了"为什么 + 验证 + 给后续开发者的提示"）
-5. **必须遵守**：[CLAUDE.md] 的 "Step-completion gate is human-in-the-loop" + auto memory `feedback_step_by_step_human_gate.md` —— 每步技术验证 PASS 后**停下等用户显式 OK** 才 commit + 进下一步，**绝不自动推进**
+**Secret 轮换历史 + 默认流程：**
+- **PPIO key** 已轮换 1 次（Step 3.3 时用户贴新 key 换 v4-pro 权限）；旧 key 还有效，用户决定要不要 revoke
+- **SMTP 授权码** 已轮换 1 次（Step 3.4 时用户暴露旧码 → 立即在 QQ 控制台重生成 → 自己手改 `.env`，**AI 从未看到新码**）
+- **默认流程**：开发者本地改 `.env`，AI 助手不需要看见新值——除非有具体改动需求（如要测真实发邮件）才告诉，告诉完再轮换
+
+**强制公约（必须遵守，跨会话生效）：**
+- [CLAUDE.md] **Step-completion gate is human-in-the-loop**：每步技术验证 PASS 后**停下等用户显式 OK** 才 commit + 进下一步，**绝不自动推进**
+- Auto memory `feedback_step_by_step_human_gate.md` 是上面这条的备份 + 详细 rationale
+- Auto memory `feedback_visual_judgment.md`：涉及颜色 / 肤色 / 视觉对比时用户肉眼判断 > 我 Read 工具描述，别二元分类带偏方向
+- Auto memory `feedback_focus_on_product.md`：项目重点放产品/工程，弱化答辩/PPT/评审视角
+
+**新会话 / `/compact` 之后的接续协议：**
+1. 跑 `git log --oneline -5` → 知道刚做完哪个 Step（commit 标题就是"Step X.Y · 标题"格式）
+2. 在 `implementation-plan.md` 找该 Step 的**下一个** → 知道下一步
+3. 读本段（📌 项目锁定状态）→ 知道当前所有项目级 trade-off
+4. 读 [CLAUDE.md] → 知道工作流规则
+5. 直接动手；遇到"为什么之前选 X"的问题去 progress.md 翻对应 Step 条目（每条都有"为什么 + 验证 + 给后续开发者的提示"）
 
 ---
