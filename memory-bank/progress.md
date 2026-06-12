@@ -944,6 +944,51 @@ benchmark 时发现原 `.env` 写的 model ID 在 PPIO 实际不可用 / 不合�
 
 ---
 
+### ✅ Step 4.3 · 款式列表接口 GET /api/styles — 2026-06-12
+
+**做了什么：**
+- `backend/app/routers/user.py` 实现 `GET /api/styles`：7 个 query 参数（`gender` / `tags` / `color_tone` / `length_pref` / `sort` / `page` / `size`）；过滤 + 排序 + 分页 + 返回 `{total, page, size, items[]}`。
+- 仅返回 `is_active=1` 的款式（与 Phase 7 运营端"下架→C 端立即看不到"形成闭环）。
+- gender 语义：未传返回全部 / `female` → `gender IN (female, both)` / `male` → `gender IN (male, both)`。
+- `tags` 多值匹配用 `style_tags LIKE '%"<tag>"%'` 多 OR 子句——style_tags 是 JSON 数组字符串，元素被 `"` 引号包围，substring 匹配不会误伤前缀重叠（查"极简"不会命中"简约"）。
+- **稳定排序 tie-breaker**：seed 时 40 行 `created_at` 共享同一个 `datetime.now()`（[seed_styles.py:50](backend/scripts/seed_styles.py#L50) 在 loop 外）+ `heat_score=50.0` 全同。`sort=new` / `sort=hot` 都加 `Style.id ASC` 做二级键，分页保证跨页不丢不重。`sort=smart` 用 `display_order ASC`（0..39 distinct），不需要 tie-break 但顺手也加。
+- 非法 `gender` / `sort` 值 → 400 + envelope（`invalid_gender` / `invalid_sort`），快速暴露前端调用 bug。
+- 新建 [`backend/scripts/_check_styles_api.py`](backend/scripts/_check_styles_api.py)（内部验证工具，下划线打头）：8 条 HTTP 自动断言，跟 Step 1.4 的 `_check_tryons.py` 同模式。后续 Step 4.4 / 4.5 验证可以照搬。
+
+**Step 4.3 验证（plan 4/4 PASS + 4 补充 PASS + 用户手动通过）：**
+
+| # | 测试 | 实测 |
+|---|---|---|
+| 1 | 无参数 → `total` | **40**（plan 写 25 是 25-female 时代数；现在 40 款全 active）|
+| 2 | `?gender=female&size=100` | total=25，全部 gender ∈ {female,both} ✅ |
+| 2b | `?gender=male&size=100` | total=15，全部 gender ∈ {male,both} ✅ |
+| 3 | `?tags=极简&size=100` | total=2，每条 style_tags 含"极简" ✅ |
+| 4 | `?sort=new&size=5` | 5 条，id=`[f_01..f_05]`（tie-break 后稳定）✅ |
+| 5 | `?sort=smart&size=5` | `[f_01..f_05]`（按 display_order 0..4）✅ |
+| 6 | `?gender=other` | **400** `invalid_gender` ✅ |
+| 7 | `?sort=foo` | **400** `invalid_sort` ✅ |
+| 8 | `?page=1&size=10` vs `?page=2&size=10` | 两页各 10 条，0 重叠 ✅ |
+
+**几个设计选择（透明告知）：**
+
+1. **plan "total=25" 调整为 40**：plan §4.3 验证语写的是 25 女款时代的预期。现在 40 款全 active，期望 40——跟 Step 2.1 "返回 25 → 返回 40" 同类 plan-vs-reality drift，按现状验证。
+2. **tie-break 加 `id ASC`**：所有 40 行 seed 共享同一 `created_at` + `heat_score=50.0`。`sort=new`/`hot` 不加二级键会让 SQLite 按物理 rowid 排，跨分页可能错位（Step 1.6 `random.seed(42)` 也是为了同样的"测试结果应可复现"诉求）。`id ASC` 是 distinct + 自然字典序，零额外索引代价。
+3. **`tags` 用 LIKE 不用 JSON 函数**：SQLAlchemy + SQLite 的 JSON1 (`json_extract`, `json_each`) 能更精确但 aiosqlite 默认不开 JSON1 扩展，需要额外配置。LIKE `'%"<tag>"%'` 在 JSON 数组字符串上完全正确（元素被 `"` 包围）。如果未来想升级到 JSON1，改 1 行 WHERE 子句。
+4. **非法 `gender` / `sort` 严格 400 vs 静默 fallback**：plan 没规定。选 400 + 语义化 msg 让前端 bug 早暴露。如果 demo 期间觉得"前端偶发拼错参数被全屏 toast 太吓人"，改"未知值视同 None"一行 if 即可。
+5. **`color_tone` / `length_pref` 不校验枚举**：plan 没列允许值。现状宽松透传——传 `color_tone=hot_pink` 不报错，只是 `WHERE` 结果空。前端只能从下拉框选有限值的话问题不大；否则未来加白名单。
+6. **不引入 Pydantic 响应模型**：用 `Query()` + 字典返回。plan §2.3 允许同文件加 Pydantic，但本步无显式收益（OpenAPI 已能从 `Query()` 推参数 schema；response 数据形状简单）。Step 4.5 / 4.6 接口若复杂到值得校验再统一引入，避免半途加抽象。
+
+**给后续开发者的提示：**
+
+- **`is_active=1` 守门永远生效**：Phase 7 运营端下架某款（`is_active=0`），C 端 `/api/styles` + `/api/recommend` 立即看不到，**实现了 design-docu §1.2 的"运营→C 端"闭环**。如果未来需要"软下架"（C 端看不到但运营端能看到管理），ops 端单独写一个 `WHERE` 不带 `is_active` 的接口。
+- **`tags=极简` 只命中 2 款是真实数据，不是 bug**：当前 40 款里只有 2 款 style_tags 数组包含"极简"。前端搜索 UI 应给"未找到"友好提示而不是空白。
+- **新增 query 参数**：直接加 `Query()` 即可，不需要 schema 模型。`color_tone` / `length_pref` 当前是字符串完全相等过滤，未来如果要多值（`?color_tone=warm,cool`）改成 `.in_(list)` 即可。
+- **`stmt.subquery()` 计算 total 的代价**：SQLite 上 40 行不在意；如果未来款式表上千需 N+1 查询优化，把 count 改成在主 stmt 上直接 count 即可。
+- **`_check_styles_api.py` 是工具不是产品**：跟 `_check_tryons.py` 一样下划线打头，committed 但不参与运行时。Step 4.4 / 4.5 / 4.6 后续会有同模式的 `_check_recommend_api.py` 等。如果觉得 `scripts/` 下脏，未来可以挪到 `tests/integration/` 但要小心不要让 pytest 自动收集（保留 `_` 前缀即可避免）。
+- **OpenAPI `/docs` Try-it-out 会被 X-User-Id 中间件拒**：用户实测 `gender=other` 和 `sort=foo` 红色 400 就是中间件后的 envelope 拒绝（不是 422 schema 错）。手动验证时要么用 PowerShell `curl.exe -H "X-User-Id: <uuid>"`，要么先在 Swagger UI 上点 "Authorize"（没配 security scheme 所以这个按钮目前没用）——后续 Phase 6 如果需要 Swagger 友好可在 FastAPI 加全局 `openapi_extra` 的 ApiKeyHeader。当前不做。
+
+---
+
 ### 📌 项目锁定状态 + 公约提醒（无需每步更新，状态真变才改）
 
 > 本段是**稳定的锁定状态指针**，不是 step-by-step 的进度条。

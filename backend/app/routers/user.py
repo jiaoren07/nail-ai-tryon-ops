@@ -22,13 +22,19 @@ auth convention (per implementation-plan Step 4.1, authoritative):
   (except /api/health) whose header is missing or not a legal UUID with
   `{code:400, msg:"invalid_user_id", data:null}`.
 """
+import json
 import time
 from io import BytesIO
 from pathlib import Path
 
-from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from PIL import Image, UnidentifiedImageError
+from sqlalchemy import func as sqlf
+from sqlalchemy import or_, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.db import get_db
+from app.models import Style
 from app.responses import ok
 
 router = APIRouter(prefix="/api")
@@ -100,3 +106,69 @@ async def upload_hand(
     (UPLOAD_DIR / photo_id).write_bytes(content)
 
     return ok(data={"photo_id": photo_id, "hand_features": hand_features})
+
+
+@router.get("/styles")
+async def list_styles(
+    db: AsyncSession = Depends(get_db),
+    gender: str | None = Query(None),
+    tags: str | None = Query(None),
+    color_tone: str | None = Query(None),
+    length_pref: str | None = Query(None),
+    sort: str = Query("smart"),
+    page: int = Query(1, ge=1),
+    size: int = Query(24, ge=1, le=100),
+):
+    """Plan §4.3: filterable / sortable / paginated active-style list."""
+    if gender is not None and gender not in {"female", "male"}:
+        raise HTTPException(400, "invalid_gender")
+    if sort not in {"smart", "hot", "new"}:
+        raise HTTPException(400, "invalid_sort")
+
+    stmt = select(Style).where(Style.is_active == 1)
+
+    if gender == "female":
+        stmt = stmt.where(Style.gender.in_(["female", "both"]))
+    elif gender == "male":
+        stmt = stmt.where(Style.gender.in_(["male", "both"]))
+
+    if color_tone:
+        stmt = stmt.where(Style.color_tone == color_tone)
+    if length_pref:
+        stmt = stmt.where(Style.length_pref == length_pref)
+
+    if tags:
+        tag_list = [t.strip() for t in tags.split(",") if t.strip()]
+        if tag_list:
+            # style_tags is a JSON-stringified array; matching `"<tag>"` (quoted)
+            # against the substring is safe because elements are JSON-quoted.
+            stmt = stmt.where(or_(*[Style.style_tags.like(f'%"{t}"%') for t in tag_list]))
+
+    total = (await db.execute(select(sqlf.count()).select_from(stmt.subquery()))).scalar_one()
+
+    # All 40 seed rows share one created_at + heat_score=50.0; add `id ASC`
+    # as a stable tie-breaker so pagination is deterministic across calls.
+    if sort == "hot":
+        stmt = stmt.order_by(Style.heat_score.desc(), Style.id.asc())
+    elif sort == "new":
+        stmt = stmt.order_by(Style.created_at.desc(), Style.id.asc())
+    else:  # smart
+        stmt = stmt.order_by(Style.display_order.asc(), Style.id.asc())
+
+    stmt = stmt.offset((page - 1) * size).limit(size)
+    rows = (await db.execute(stmt)).scalars().all()
+
+    items = [
+        {
+            "id": r.id,
+            "name": r.name,
+            "cover_url": r.cover_url,
+            "gender": r.gender,
+            "style_tags": json.loads(r.style_tags),
+            "color_main": r.color_main,
+            "length_pref": r.length_pref,
+        }
+        for r in rows
+    ]
+
+    return ok(data={"total": total, "page": page, "size": size, "items": items})
