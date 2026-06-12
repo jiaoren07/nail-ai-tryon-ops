@@ -816,6 +816,53 @@ benchmark 时发现原 `.env` 写的 model ID 在 PPIO 实际不可用 / 不合�
 
 ---
 
+### ✅ Step 3.4 · 邮件发送服务 — 2026-06-12
+
+**做了什么：**
+- 新建 `backend/app/services/email.py`（100 行）：
+  - `EmailSendError`：失败专用异常，`raise ... from e` 保留底层异常链便于调试
+  - `wrap_html(body)`：把 raw HTML 套进 design-docu §7.7.4 规定的 inline-CSS 包装——680px 宽 / Apple System 字体栈 / 1.6 行距 / `<hr>` 分隔 / 中文 AI 助手自动生成脚注 + 实时时间戳
+  - `async send_email(to, subject, html_body, text_body)`：MIMEMultipart('alternative') 两段式（plain 在前、HTML 在后，符合 RFC——客户端取最后一个能渲染的），SMTPS 走 `smtplib.SMTP_SSL` 端口 465，timeout 30s
+- **同步 smtplib 通过 `asyncio.to_thread` 异步化**：不引入 aiosmtplib 第三方依赖（保持 requirements.txt 干净）；sync 调用在线程池跑，不阻塞 FastAPI 事件循环
+- 分层异常映射：`SMTPException` / `OSError` / 其他 Exception 都包成 `EmailSendError`，message 标注异常类型；底层异常通过 `__cause__` 保留，**绝不静默吞掉**（plan §3.4 硬要求）
+
+**Step 3.4 验证（5/5 自动化 PASS + 真实邮件 PASS）：**
+
+| 验证项 | 实测 |
+|---|---|
+| 1. import smoke：`send_email` / `EmailSendError` / `wrap_html` 三导出可用 | ✅ |
+| 2. `wrap_html` 结构正确（680px 宽 / Apple System / 中文脚注 / `<hr>` / 时间戳）| ✅ |
+| 3. SMTP 配置 4 项都空时抛 `EmailSendError`，message 显式指出缺哪几项 | ✅ |
+| 4. 空 `to` 抛 `EmailSendError("recipient 'to' is empty")` | ✅ |
+| 5. 假 SMTP host 抛 `EmailSendError`，底层 `SSLEOFError` 通过 `__cause__` 保留 | ✅ |
+| 6. **真实发邮件**：QQ smtp.qq.com:465 → 用户的 277092506@qq.com，API 2.81s 完成 | ✅ |
+| 7. **用户手动确认 30 秒内收到邮件，HTML 渲染正常** | ✅ |
+
+**产品架构澄清（用户提的好问题）：发件 vs 收件是两个独立角色**
+用户在 Step 3.4 实施时问"为什么要我的 SMTP 授权码？产品上线后不是每个用户绑自己的邮箱吗？"——好问题，docu 里应该早说。
+
+实际架构：
+- **发件人**（`SMTP_USER` / `SMTP_PASS` / `SMTP_FROM`）= **平台官方账号**，一份固定。生产环境会是 `report@platform.com` 这类专门发件账号，授权码进环境变量
+- **收件人**（`REPORT_RECIPIENT` 或 future `notification_subscribers` 表）= **运营个人邮箱**，他们只填地址，**不需要授权码**，因为他们只收不发
+- demo 阶段没有"平台 IT 部门"，所以用户的 QQ 临时同时扮演这两个角色（既是平台发件账号也是运营收件邮箱）。**生产时会拆开**
+
+未来 docu 可在 design-docu §7.7 增一段"production-readiness"小节明确这事，**暂时不动**——当前 demo 阶段够用，docu 写早了等下个版本又要改。
+
+**安全：授权码已轮换**
+用户在对话里贴出了 SMTP 授权码 `vxhqqacvdibebjci`——同 Step 3.3 的 PPIO key 类似的对话历史泄露风险。验证完成后用户**立即在 QQ 控制台重新生成了新授权码**，并由用户自己手动改进 `.env`（**没经过对话**），从根本上避免新码再次泄露。
+
+这套"我从不知道新码是什么"模式建议作为后续 secret rotation 的**默认流程**：开发者本地改 `.env`，AI 助手不需要看见新值——除非有具体改动需求才告诉。
+
+**给后续开发者的提示：**
+- **Phase 9 报告推送会复用这个 `send_email`**：日报 / 周报生成后，`send_report_email(report)` 调用 `send_email(REPORT_RECIPIENT, title, content_md_to_html, content_md)`。`asyncio.create_task` 非阻塞调用，失败时报告本身已入库 + 站内信已发，只有邮件状态标 `email_status='failed'`，详见 Step 9.1
+- **加多收件人**：当前 `to: str` 是单地址。未来要群发（如运营群、或不同运营订阅不同频率）扩展为 `to: str | list[str]` + msg["To"] join `, `——一行改动
+- **QQ 邮箱限制要小心**：QQ SMTP 服务对单日发送量、收件人数有限制（个人邮箱约 50 封/天）。Phase 9 调度的日报+周报频率不会触碰，但如果未来加"事件实时通知"要注意。生产换企业邮箱或专业发件服务（阿里云邮件推送、SendGrid）
+- **真测前 dry run 一次**：演示前一天用真 SMTP 配置发一封测试邮件，确认授权码没过期/邮箱没被风控。授权码偶尔会被 QQ 主动失效
+- **HTML 渲染不一致**：不同邮箱客户端对 inline CSS 支持差异大。当前 `wrap_html` 经过 QQ 实测 OK。未来如果加 163、Outlook、Gmail 等多端用户，建议用 `litmus` 或类似工具做兼容性验证；最常见坑是嵌套 `<table>`、background-image、media query 全部不可靠
+- **同步 smtplib 性能足够**：单线程 `asyncio.to_thread` 不会阻塞主循环。Phase 9 一天 1-2 次调用，并发量极低。如果未来 demo 演化成需要批量发件（活动营销），换 `aiosmtplib` 真异步会更优雅
+
+---
+
 ### 📍 CHECKPOINT — 2026-06-11（用户准备 /compact 之前）
 
 **当前位置：**
