@@ -989,6 +989,49 @@ benchmark 时发现原 `.env` 写的 model ID 在 PPIO 实际不可用 / 不合�
 
 ---
 
+### ✅ Step 4.4 · 推荐算法核心模块 — 2026-06-12
+
+**做了什么：**
+- 新建 [`backend/app/services/recommend.py`](backend/app/services/recommend.py)（~160 行）：4 维评分 + 多样性 rerank 模块，**无 HTTP**（HTTP 路由是 Step 4.5）。
+  - `_SKIN_COLOR_SCORE`：5 skin_tone × 3 color_tone 查表 → [0,1]（默认 0.5 兜底）
+  - `_SHAPE_LENGTH_SCORE`：1 hand_shape × 3 length_pref（当前 hand_shape 只有 `average`，未来加真识别就扩表）
+  - `_recent_7d_tryon_counts(db, ids)`：**单次** SQL `SUM(tryon_count) GROUP BY style_id WHERE stat_date >= 7-day-ago`，批量计算所有候选的热度，N+1 优化。窗口起点用北京时区 `datetime.now(_BJT).date()`，与 seed_stats.py 用 `date(created_at, 'localtime')` 的语义对齐。
+  - `_diversity_rerank(scored, top_k=9, min_categories=3)`：贪心 swap——若 top-9 已含 ≥3 类首要标签则原样返回；否则按分数顺序遍历尾部，每个"新类别"候选与 selected 内某个"重复类别"的最低分行交换，直到达成阈值或无候选可换。
+  - `recommend(db, gender, hand_features, top_k=9)` 编排：硬性别筛选 → 4 维打分 → 排序（含 id 二级键 stability）→ rerank。返回每个 item 带子分量字段（`skin_score / shape_score / heat_score / final_score`）方便 Step 4.5 LLM 拼推荐理由 + 运营端 debug。
+- 新建 [`backend/tests/test_recommend.py`](backend/tests/test_recommend.py)（~80 行）：5 假用户 × 40 候选完整跑通，4 类断言（返回 9 条 / 首要标签 ≥3 类 / dark_cool 男 top-3 cool>warm / 性别不串）。
+
+**Step 4.4 验证（5 用户 × 4 断言 = 20/20 PASS + 用户视觉确认）：**
+
+| 用户 | top-1 | top-3 倾向 | 首要标签覆盖 | 关键观察 |
+|---|---|---|---|---|
+| F1 light_warm 女 | f_15 warm 复杂图案 | warm×2 / neutral×1 | 6 类 | 暖色优先命中 ✅ |
+| F2 dark_cool 女 | f_09 neutral 跳色 | warm×1 / neutral×2 | 5 类 | 女款 0 cool，algo 选高 skin 的 neutral 兜底 |
+| F3 medium 女 | f_15 warm 复杂图案 | warm×1 / neutral×2 | 5 类 | medium universal，heat 主导 |
+| M1 light_warm 男 | m_15 cool 深色系 | cool×1 / warm×2 | 4 类 | heat=1.00 让明星款压过暖偏好（合理 trade-off）|
+| **M2 dark_cool 男** | **m_15 cool 深色系 score=0.785** | **cool×3 / warm×0** | 3 类 | **plan §4.4 验证 2 核心证据**：top-3 全冷调，0 暖 |
+
+**几个设计选择（透明告知）：**
+
+1. **diversity 维度的 0% 评分贡献**：design-docu §6.3 伪代码直接写 `0.15 * 0`。维度只在 rerank 阶段材化。若改成评分阶段加 diversity bonus 需要全局组合优化，实现成本飙升。当前 rerank 法简单 + 完全够 demo + 与设计文档严格一致。
+2. **`heat_score` 用 max 归一化而非线性映射 50→1**：pool 内热度差异感更强，"今日最热"自动得 1.00、其他相对它打分。如果未来想绝对阈值（"必须真热才得高分"），改成 `min(count/100, 1.0)` 之类，但当前数据集 60 天 12000+ tryons 用绝对值不合理。
+3. **`final_score` 上限 0.85 不是 1.0**：4 维满分 = 0.35×1 + 0.30×1 + 0.20×1 + 0.15×**0** = 0.85（diversity 维度评分贡献 0 是设计文档原话）。前端展示百分比时再 `score/0.85` 归一即可。
+4. **女款 dark_cool 没 cool 候选 → top-1 是高 heat 的 neutral**：CLAUDE.md 已警示"Female 25 has 0 cool-tone styles"。测试脚本只对 male dark_cool 断言 cool>warm；female dark_cool 上算法给出**次优可达解**（neutral 通配在缺 cool 时是 0.80 vs warm 0.45，且 emerging_hot 高 heat 拉动 f_09 上位）。这是数据集结构性约束不是算法 bug。
+5. **score 子分量都返回**：`skin_score` / `shape_score` / `heat_score` 与 `final_score` 都在每个 item 里。Step 4.5 LLM prompt 可引用具体维度（"暖色衬你浅暖皮"），运营端可看"为什么这款被推第 1"。**注意 `heat_score` 字段在两层语义里复用**：DB `styles.heat_score` 是固定 50 基线；返回 dict 里 `heat_score` 是 7d 归一化后的 [0,1] 值。Step 4.5 / O5 助手用要区分。
+6. **`tests/test_recommend.py` 带 `test_` 前缀但是 runnable script**：plan 字面"保留在 backend/tests/ 下"。前缀让未来引 pytest 时自动收集；当前 `if __name__ == "__main__"` 形态可直接 `python` 跑，不依赖 pytest。
+7. **`SkinTone` / `ColorTone` 不用 Enum / Literal 强类型**：plan 没要求；当前都是字符串，查表兜底默认 0.5 / 0.6。未来若想强类型，加 `Literal["light_warm", ...]` 一行即可，runtime 无影响。
+
+**给后续开发者的提示：**
+
+- **Step 4.5 `POST /api/recommend` 实现路径**：路由层 (1) 校验 body `{gender, hand_features}` → (2) `await recommend(db, gender, hand_features, top_k=9)` 拿评分列表 → (3) 用 `services/llm.py` 的 `gen_text(..., model="quick")` **并发**生成 9 条推荐理由 → (4) 把 `reason` 填回每个 item → (5) 返回 `ok(data={recommendations: [...]})`。并发用 `asyncio.gather` 批量调 quick 模型（80B MoE 单次 1.5-2s × 9 并发 ≈ 总耗时 2-3s）。
+- **推荐理由 prompt 模板见 design-docu §6.3 末尾**：包含性别专属措辞约束（女多用"衬肤""显白"、男多用"商务""利落""酷"），实现时直接复制粘贴。
+- **`recommend()` 不带 user_id 参数**：算法本身无个性化记忆（用户从未提供过偏好数据），只依赖即时上传的 hand_features。Step 4.5 路由从 header 拿 X-User-Id 写 tryons 表（如果 demo 设计想记录"该用户被推荐过哪些"），跟 recommend 模块解耦。
+- **多样性 rerank 实测几乎不触发**：5 用户里 4 个 organic top-9 就已含 ≥3 类首要标签。只有当候选池 ≤9 或某个 skin/shape 组合压倒性匹配某一类标签时才会触发 swap。这不是 bug——证明评分本身已有"自然多样性"。
+- **改评分表的成本**：`_SKIN_COLOR_SCORE` / `_SHAPE_LENGTH_SCORE` 是普通 dict 常量。改一格 → 重跑 `tests/test_recommend.py` → 看 PASS/输出 → commit。无 DB 迁移、无前端联动。Demo 期间用户视觉判断不满意某组合（[feedback_visual_judgment]），直接改一行。
+- **`max_heat` div-by-zero 兜底**：所有候选 7 天 0 tryon（极端冷启动）时 `max_heat` 被强制设 1，heat_score 全 0，但其他维度仍正常排序。算法不崩。
+- **跨用户 score 不可直接比较**：score 是 pool 内相对值（heat 用 max 归一化）。U1 用户的 0.785 与 U2 用户的 0.785 含义不同——不要在运营端展示成"用户 A 比 B 更适合 m_15"，意义不对。
+
+---
+
 ### 📌 项目锁定状态 + 公约提醒（无需每步更新，状态真变才改）
 
 > 本段是**稳定的锁定状态指针**，不是 step-by-step 的进度条。
