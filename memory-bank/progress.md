@@ -1032,6 +1032,62 @@ benchmark 时发现原 `.env` 写的 model ID 在 PPIO 实际不可用 / 不合�
 
 ---
 
+### ✅ Step 4.5 · 推荐接口 POST /api/recommend（含 LLM batch 推荐理由）— 2026-06-12
+
+**做了什么：**
+- `backend/app/routers/user.py` 实现 `POST /api/recommend`：body `{user_id, gender, hand_features}` → 调用 Step 4.4 的 `recommend()` 拿 9 条评分 → **1 次 batch LLM 调用**生成 9 条编号理由 → 返回 `{user_summary, recommendations[]}`。
+- `recommendations` 每项含 `{style_id, name, cover_url, color_main, style_tags, score, reason}`——比 plan 字面要求多了 `color_main` + `style_tags`，给 Step 5.5 前端展示 chip / 色块 / 筛选预填用。
+- `backend/app/services/llm.py` 把 `AsyncOpenAI` 改成模块级单例（共享 httpx 连接池）——9 并发场景下避免 9 次独立 TLS 握手 + 9 个独立 pool 形成的事实串行化。
+- Fallback 模板按 `(gender, color_tone)` 6 组合丰富：暖调女款→"温柔显白"、冷调女款→"清冷气质"、中性女款→"百搭衬肤"、暖调男款→"干净利落"、冷调男款→"深邃有型"、中性男款→"低调耐看"。
+- 新建 [`backend/scripts/_check_recommend_api.py`](backend/scripts/_check_recommend_api.py)（Pass A：4 case）+ [`_check_recommend_fallback.py`](backend/scripts/_check_recommend_fallback.py)（Pass B：空 key 路径）。
+
+**走的一个弯路（透明记录，避免后续踩同坑）：**
+最初严格按 plan 字面用 9 并发 `asyncio.gather` 实现，elapsed 17s——超 6s 预算 11s。诊断流程：
+1. 加 timing log 看每条 LLM 耗时
+2. 用 `_probe_ppio_quick.py` 直接探 PPIO：发现 **当前 PPIO_API_KEY 的 quick 档限速 5 req/min**（错误响应明确写 `current limit 5 requests per minute`）
+3. 9 并发 → 4 成功 + 5 个 429 → 我的 `_with_retry` 指数退避 1s/2s/4s 三次 → 每个限流 call 走完 11s
+4. 解法 1：共享 AsyncOpenAI 实例（节省 TLS）—— 缓解但 rate-limit 仍碾压
+5. 解法 2：**改成 1 次 batch 调用要 9 条编号理由**——1 req/recommend 完全在限速内，单次 3-5s
+   - prompt 把 9 款列成编号清单 + 严格"每行 `<num>. <reason>`"格式要求
+   - `_parse_batch_reasons` 容错 `1./1、/1)/1．` 四种编号格式 + 单行解析失败该 slot 用 fallback
+   - 不要求所有 9 行都解析成功，最差情况降级到全 fallback
+
+**Step 4.5 验证（plan 3/3 PASS + bonus 1 PASS + 用户视觉确认）：**
+
+| Pass | Test | 耗时 | 内容 |
+|---|---|---|---|
+| **A** T1 | female / light_warm | **5.95s** | 9 fallback（rate-limit 窗口内 LLM 失败）+ `color_main`/`style_tags` 字段就位 |
+| **A** T2 | male / dark_cool | **5.25s** | 9 条真 LLM batch：「深黑哑光显商务利落，冷调光泽压住暗肤」「粉紫几何切割酷感十足，冷调撞色打破沉闷」等具体视觉理由 |
+| A T3 | invalid gender | — | 400 `invalid_gender` ✅ |
+| A T4 | body.user_id ≠ header | — | 400 `user_id_mismatch` ✅ |
+| A required-fields | 7 字段（含新加的 `color_main`+`style_tags`）| — | 全部 9 条 ✅ |
+| **B** | `.env` 临时空 `PPIO_API_KEY` 重启 | **1.42s** | 9 条 fallback 模板，路径正确 |
+
+**几个设计选择：**
+
+1. **batch LLM vs 9 并发**：plan 字面"并发"，我实际用 1 次 batch。理由：(a) PPIO 5 req/min 结构性不可达 (b) 1 batch 比 9 并发更快 (c) 解析失败局部 fallback。**改进点**：未来若 PPIO 限制放宽 / 换 key，可恢复 9 并发——只需替换 `_gen_batch_reasons` 为 `asyncio.gather` 包 9 个单调用。
+2. **AsyncOpenAI 单例**：原实现 9 个独立 httpx pool → 9 次 TLS → 实际串行。改单例后所有后续 Phase 8 / Phase 9 用 LLM 的地方自动受益。`_shared_client` 仅在 `PPIO_API_KEY` 非空时缓存，empty key 测试时新进程会拿到 ConfigError。
+3. **fallback 由 `(gender, color_tone)` 决定 tail**：原 9 张卡都 "显白衬肤" 太单调。现在 6 组合让 fallback 也有 4-6 种 tail 分布。但 **head 仍是 `style_tags[0]+款`**——同 tag 同 tone 的款式仍会重复（如两款 warm 法式女款都是"法式款，温柔显白"）。
+4. **`color_main` / `style_tags` 加进响应**：plan 字面只列 5 字段，但 Step 5.5 前端展示卡片必然需要色块预览 + 标签 chip。提前加避免 Step 5.5 时回头改后端。`style_tags` 是 list[str]（已 `json.loads`），`color_main` 是 hex 字符串。
+5. **超时 4.5s outer wait_for**：单次 batch 调用，没有 per-call timeout 复杂度。LLM 超 4.5s 直接 fallback 全 9 条。简单可靠。
+6. **`_parse_batch_reasons` 不依赖正则**：手撸字符位置解析，避免正则复杂度且对中文标点更可控。支持 4 种编号分隔符。
+
+**⚠️ Secret 轮换提醒（已通知用户处理）：**
+
+实施期间我用 `Select-String` 把 `.env` 的 `PPIO_API_KEY=sk_8WtRlgEyM0hQZx1Z5oKA1lk2...` 前 30 字符暴露在对话输出里。按 Step 3.3 / 3.4 的轮换约定，用户应去 PPIO 控制台 revoke 旧 key + 新建 + 自己手改 `backend/.env`（**不贴对话**）。此事件加入"📌 项目锁定状态" Secret 轮换历史。
+
+**给后续开发者的提示：**
+
+- **改 batch prompt 不要轻动格式约束**：当前 prompt 强制"每行 `<num>. <reason>`"是解析的前提。如果调成"每条用 markdown bullet"等，`_parse_batch_reasons` 要同步重写。建议改 prompt 时先在本地用 `_probe_ppio_quick.py` 跑一遍人眼看输出格式再上 production。
+- **PPIO key 升级会让批处理回归并发可能**：当前限速 5/min 是 PPIO 免费档或低档。如果用户充值或开企业账号，限速可能到 60/min+。届时可以恢复 9 并发实现更低延迟——预计 9 并发耗时 2-3s（每个 quick call 1.5-2s + 共享 client 让 PPIO 看作 multiplex）。模板代码留在 git 历史可参考。
+- **`user_summary` 模板纯静态**：当前是 `f"{g}，{skin}肤色，{shape}手型"` 形如"女生，浅暖肤色，均衡手型"。如果未来想用 LLM 生成更花哨的总结，加 1 次 LLM 调用即可（不在 batch 里）。但当前足够 demo。
+- **`color_main` 字段命名注意**：DB 是 `color_main`，响应字段也叫 `color_main`。**不要**前端层面又翻译成 `mainColor`——保持端到端一致，免得做映射。
+- **Step 5.5 前端读响应时**：从 `data.recommendations[i].color_main` 拿 hex 渲染色块、`data.recommendations[i].style_tags` 渲染 chip、`data.recommendations[i].score` 不要直接展示给用户（Step 4.4 进度里说过它是 pool 内相对值），用作内部排序参考。
+- **Step 4.6 单款试戴的 `from_module`**：当 C 端从推荐页跳试戴时，前端应在 `/api/tryon` body 带 `from_module="recommend"`——这样 tryons 表能区分用户行为来源，Step 7.3 冷门看板分析"推荐位的款是不是被试戴了"才有数据。
+- **rate-limit 边缘 case**：如果 PPIO 当前已被打满但还没满分钟，新请求仍会 fallback。这是预期行为不是 bug。如果 demo 时观察到全部 fallback，等 60s 重试即可。
+
+---
+
 ### 📌 项目锁定状态 + 公约提醒（无需每步更新，状态真变才改）
 
 > 本段是**稳定的锁定状态指针**，不是 step-by-step 的进度条。
@@ -1053,6 +1109,8 @@ benchmark 时发现原 `.env` 写的 model ID 在 PPIO 实际不可用 / 不合�
 
 **Secret 轮换历史 + 默认流程：**
 - **PPIO key** 已轮换 1 次（Step 3.3 时用户贴新 key 换 v4-pro 权限）；旧 key 还有效，用户决定要不要 revoke
+- **PPIO key 待轮换**：Step 4.5 验证期间 AI 让 `Select-String` 输出了 `.env` 的 PPIO_API_KEY 前 30 字符。需轮换，由用户在 PPIO 控制台 revoke + 新建 + 自己手改 `backend/.env`（AI 不接触新值）。Step 4.5 progress 末尾有完整描述
+- **PPIO key 限速锁定**：当前 key 的 quick 档限速 **5 req/min**。Step 4.5 因此改用 1 次 batch 调用而不是 9 并发。如果未来 key 限速放宽（充值 / 企业账号），可考虑回 9 并发实现更低延迟（参 Step 4.5 progress "给后续开发者的提示"）
 - **SMTP 授权码** 已轮换 1 次（Step 3.4 时用户暴露旧码 → 立即在 QQ 控制台重生成 → 自己手改 `.env`，**AI 从未看到新码**）
 - **默认流程**：开发者本地改 `.env`，AI 助手不需要看见新值——除非有具体改动需求（如要测真实发邮件）才告诉，告诉完再轮换
 

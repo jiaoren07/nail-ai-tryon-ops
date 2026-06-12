@@ -22,13 +22,16 @@ auth convention (per implementation-plan Step 4.1, authoritative):
   (except /api/health) whose header is missing or not a legal UUID with
   `{code:400, msg:"invalid_user_id", data:null}`.
 """
+import asyncio
 import json
+import logging
 import time
 from io import BytesIO
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from PIL import Image, UnidentifiedImageError
+from pydantic import BaseModel
 from sqlalchemy import func as sqlf
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -36,6 +39,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db import get_db
 from app.models import Style
 from app.responses import ok
+from app.services import llm
+from app.services.recommend import recommend
+
+_log = logging.getLogger("nail_demo.user")
 
 router = APIRouter(prefix="/api")
 
@@ -172,3 +179,188 @@ async def list_styles(
     ]
 
     return ok(data={"total": total, "page": page, "size": size, "items": items})
+
+
+# ===== Step 4.5: POST /api/recommend =====
+
+class RecommendBody(BaseModel):
+    user_id: str
+    gender: str
+    hand_features: dict
+
+
+_SKIN_ZH = {
+    "light_warm": "浅暖", "light_cool": "浅冷",
+    "medium": "中性", "dark_warm": "深暖", "dark_cool": "深冷",
+}
+_SHAPE_ZH = {"average": "均衡"}
+_GENDER_TONE_HINT = {
+    "female": '多用"衬肤""显白""精致"等词',
+    "male": '多用"商务""干净""利落""酷"等词',
+}
+# Fallback descriptors keyed by (gender, color_tone) so the 9 cards in a
+# fallback batch don't all read identically — gives the demo a richer feel
+# when PPIO rate-limits us (current `quick` key is 5 req/min, see progress
+# Step 4.5 notes).
+_FALLBACK_TAIL_BY_TONE: dict[tuple[str, str], str] = {
+    ("female", "warm"): "温柔显白",
+    ("female", "cool"): "清冷气质",
+    ("female", "neutral"): "百搭衬肤",
+    ("male", "warm"): "干净利落",
+    ("male", "cool"): "深邃有型",
+    ("male", "neutral"): "低调耐看",
+}
+_REASON_LLM_TIMEOUT = 4.5  # single batched LLM call — well within 6s budget
+
+
+def _user_summary(gender: str, hand_features: dict) -> str:
+    skin = _SKIN_ZH.get(hand_features.get("skin_tone", "medium"), "中性")
+    shape = _SHAPE_ZH.get(hand_features.get("hand_shape", "average"), "均衡")
+    g = "女生" if gender == "female" else "男生"
+    return f"{g}，{skin}肤色，{shape}手型"
+
+
+def _fallback_reason(item: dict, gender: str) -> str:
+    tags = item.get("style_tags") or []
+    head = tags[0] if tags else "经典"
+    tone = item.get("color_tone", "neutral")
+    tail = _FALLBACK_TAIL_BY_TONE.get(
+        (gender, tone), _FALLBACK_TAIL_BY_TONE[(gender, "neutral")]
+    )
+    return f"{head}款，{tail}"[:25]
+
+
+def _build_batch_prompt(items: list[dict], gender: str, hand_features: dict) -> str:
+    """One prompt asking for 9 numbered reasons.
+
+    Rationale: PPIO's `quick` tier is 5 req/min for our current key. Issuing
+    9 parallel single-style calls is impossible without rate-limit fallback
+    on most cards. Batching all 9 into one call costs 1 request and lets
+    `quick` (qwen3-next-80b) produce all 9 reasons in ~3-5s.
+    """
+    skin = hand_features.get("skin_tone", "medium")
+    shape = hand_features.get("hand_shape", "average")
+    g_zh = "女" if gender == "female" else "男"
+    tone_hint = _GENDER_TONE_HINT.get(gender, "")
+
+    style_lines = []
+    for i, it in enumerate(items, start=1):
+        tags_str = "、".join((it.get("style_tags") or [])[:3])
+        style_lines.append(
+            f"{i}. {it.get('name','')}（标签{tags_str}，主色{it.get('color_main','')}，色调{it.get('color_tone','')}）"
+        )
+    styles_block = "\n".join(style_lines)
+    n = len(items)
+
+    return (
+        f"你是美甲推荐专家。为以下 {n} 款美甲分别写一句推荐理由。\n"
+        f"用户：{g_zh}，肤色{skin}，手型{shape}\n\n"
+        f"款式列表：\n{styles_block}\n\n"
+        "要求：\n"
+        f"- 每行格式严格为「<编号>. <理由>」，共输出 {n} 行\n"
+        "- 每条理由 ≤25 字，必须含具体视觉理由\n"
+        f"- {tone_hint}\n"
+        '- 不要说"适合您""精选好物"等空话\n'
+        "- 不要加任何前言、解释、引号"
+    )
+
+
+def _clean_reason(text: str) -> str:
+    text = text.strip()
+    for prefix in ("推荐理由：", "理由：", "答：", "AI推荐：", "推荐："):
+        if text.startswith(prefix):
+            text = text[len(prefix):].strip()
+            break
+    for lq, rq in (('"', '"'), ("'", "'"), ("“", "”"), ("「", "」")):
+        if text.startswith(lq) and text.endswith(rq) and len(text) >= 2:
+            text = text[1:-1].strip()
+            break
+    return text[:25]
+
+
+def _parse_batch_reasons(text: str, n: int) -> list[str]:
+    """Pull `n` numbered lines out of the LLM batch response.
+
+    Returns a list of length n; entries that couldn't be matched are "".
+    Caller fills "" slots with fallback templates.
+    """
+    out = [""] * n
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        # Match leading "<num>. " or "<num>、" or "<num>) "
+        idx_end = 0
+        while idx_end < len(line) and line[idx_end].isdigit():
+            idx_end += 1
+        if idx_end == 0 or idx_end >= len(line):
+            continue
+        sep = line[idx_end]
+        if sep not in {".", "、", ")", "．"}:
+            continue
+        try:
+            num = int(line[:idx_end])
+        except ValueError:
+            continue
+        if not (1 <= num <= n):
+            continue
+        out[num - 1] = _clean_reason(line[idx_end + 1:].strip())
+    return out
+
+
+async def _gen_batch_reasons(
+    items: list[dict], gender: str, hand_features: dict
+) -> list[str]:
+    """One batched LLM call → 9 reasons; failed/missing slots use template fallback."""
+    try:
+        prompt = _build_batch_prompt(items, gender, hand_features)
+        text = await asyncio.wait_for(
+            llm.gen_text(prompt, model="quick", max_tokens=600),
+            timeout=_REASON_LLM_TIMEOUT,
+        )
+        parsed = _parse_batch_reasons(text, len(items))
+        return [
+            r if r else _fallback_reason(item, gender)
+            for r, item in zip(parsed, items)
+        ]
+    except Exception as e:
+        _log.info("recommend: batch LLM fell back: %s", e)
+        return [_fallback_reason(item, gender) for item in items]
+
+
+@router.post("/recommend")
+async def recommend_endpoint(
+    body: RecommendBody,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Plan §4.5: 9-style recommendation + per-card LLM reason (≤25 chars)."""
+    if body.user_id != request.headers["X-User-Id"]:
+        raise HTTPException(400, "user_id_mismatch")
+    if body.gender not in {"female", "male"}:
+        raise HTTPException(400, "invalid_gender")
+
+    recs = await recommend(db, body.gender, body.hand_features, top_k=9)
+    if not recs:
+        return ok(data={
+            "user_summary": _user_summary(body.gender, body.hand_features),
+            "recommendations": [],
+        })
+
+    reasons = await _gen_batch_reasons(recs, body.gender, body.hand_features)
+
+    return ok(data={
+        "user_summary": _user_summary(body.gender, body.hand_features),
+        "recommendations": [
+            {
+                "style_id": item["id"],
+                "name": item["name"],
+                "cover_url": item["cover_url"],
+                "color_main": item["color_main"],
+                "style_tags": item["style_tags"],
+                "score": item["final_score"],
+                "reason": reason,
+            }
+            for item, reason in zip(recs, reasons)
+        ],
+    })

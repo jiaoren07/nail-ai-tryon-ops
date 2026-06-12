@@ -44,15 +44,27 @@ class LLMError(Exception):
     """Raised when an LLM call fails after retries or on non-retryable HTTP errors."""
 
 
+_shared_client: AsyncOpenAI | None = None
+
+
 def _client() -> AsyncOpenAI:
+    """Module-level singleton AsyncOpenAI client.
+
+    Concurrent calls (e.g. Step 4.5's 9-way recommend batch) share one
+    httpx connection pool, avoiding repeated TLS handshakes that serialize
+    PPIO requests behind per-IP connect limits.
+    """
+    global _shared_client
     if not settings.PPIO_API_KEY:
         raise ConfigError("PPIO_API_KEY missing")
-    return AsyncOpenAI(
-        api_key=settings.PPIO_API_KEY,
-        base_url=settings.PPIO_BASE_URL,
-        timeout=TIMEOUT_SECONDS,
-        max_retries=0,
-    )
+    if _shared_client is None:
+        _shared_client = AsyncOpenAI(
+            api_key=settings.PPIO_API_KEY,
+            base_url=settings.PPIO_BASE_URL,
+            timeout=TIMEOUT_SECONDS,
+            max_retries=0,
+        )
+    return _shared_client
 
 
 def _model_id(tier: Tier) -> str:
