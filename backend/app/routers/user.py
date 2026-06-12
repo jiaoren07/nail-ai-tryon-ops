@@ -22,14 +22,81 @@ auth convention (per implementation-plan Step 4.1, authoritative):
   (except /api/health) whose header is missing or not a legal UUID with
   `{code:400, msg:"invalid_user_id", data:null}`.
 """
-from fastapi import APIRouter
+import time
+from io import BytesIO
+from pathlib import Path
+
+from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
+from PIL import Image, UnidentifiedImageError
 
 from app.responses import ok
 
 router = APIRouter(prefix="/api")
+
+UPLOAD_DIR = Path(__file__).resolve().parents[2] / "static" / "uploads"
+MAX_UPLOAD_BYTES = 10 * 1024 * 1024
+ALLOWED_EXT = {"png", "jpg", "jpeg"}
+
+
+def _analyze_hand(image_bytes: bytes) -> dict:
+    """Mock hand analysis per plan §4.2.
+
+    Take the center 100x100 px (or whole image if smaller), average RGB,
+    map to one of 5 skin_tone enums. hand_shape is fixed `average`.
+    """
+    img = Image.open(BytesIO(image_bytes)).convert("RGB")
+    w, h = img.size
+    box_w = min(100, w)
+    box_h = min(100, h)
+    left = (w - box_w) // 2
+    top = (h - box_h) // 2
+    crop = img.crop((left, top, left + box_w, top + box_h))
+    pixels = list(crop.getdata())
+    n = len(pixels)
+    r = sum(p[0] for p in pixels) / n
+    b = sum(p[2] for p in pixels) / n
+
+    if r > 200:
+        skin_tone = "light_warm" if (r - b) > 20 else "light_cool"
+    elif r >= 150:
+        skin_tone = "medium"
+    else:
+        skin_tone = "dark_warm" if (r - b) > 20 else "dark_cool"
+    return {"skin_tone": skin_tone, "hand_shape": "average"}
 
 
 @router.get("/ping")
 def ping():
     """Liveness probe for the C-end router. Plan §2.3 verification target."""
     return ok(data={"router": "user"})
+
+
+@router.post("/user/upload")
+async def upload_hand(
+    request: Request,
+    file: UploadFile = File(...),
+    user_id: str = Form(...),
+):
+    """Plan §4.2: accept a hand photo, save to static/uploads/, return mock skin_tone."""
+    header_uid = request.headers["X-User-Id"]  # guaranteed by Step 4.1 middleware
+    if user_id != header_uid:
+        raise HTTPException(400, "user_id_mismatch")
+
+    filename = file.filename or ""
+    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+    if ext not in ALLOWED_EXT:
+        raise HTTPException(415, "unsupported_format")
+
+    content = await file.read()
+    if len(content) > MAX_UPLOAD_BYTES:
+        raise HTTPException(413, "file_too_large")
+
+    try:
+        hand_features = _analyze_hand(content)
+    except UnidentifiedImageError as e:
+        raise HTTPException(415, "unsupported_format") from e
+
+    photo_id = f"{header_uid}_{int(time.time() * 1000)}.{ext}"
+    (UPLOAD_DIR / photo_id).write_bytes(content)
+
+    return ok(data={"photo_id": photo_id, "hand_features": hand_features})

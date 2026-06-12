@@ -903,6 +903,47 @@ benchmark 时发现原 `.env` 写的 model ID 在 PPIO 实际不可用 / 不合�
 
 ---
 
+### ✅ Step 4.2 · 上传接口 + 手部 Mock 分析 — 2026-06-12
+
+**做了什么：**
+- `backend/app/routers/user.py` 实现 `POST /api/user/upload`：multipart `file` + form `user_id`，扩展名 ⊂ {png,jpg,jpeg}，大小 ≤ 10MB，保存到 `static/uploads/{header_uid}_{ms_ts}.{ext}`。
+- 抽出 `_analyze_hand(image_bytes) -> dict` 辅助函数：用 PIL 把图转 RGB → 中心 100×100 box（图小则取全图）→ 像素逐 channel 求平均 → 按 plan §4.2 规则映射 5 档 `skin_tone`（light_warm / light_cool / medium / dark_warm / dark_cool），warm/cool 边界用 `R - B > 20`。`hand_shape` 固定 `"average"` 占位（plan 明确"演示无感"）。
+- Step 4.1 的 X-User-Id 中间件已覆盖请求合法性；本步增加 `form.user_id != header.X-User-Id` 时抛 400 `user_id_mismatch`，让文件名构造永远只用 UUID 验证过的 header 值（path traversal 攻击面归零）。
+- 错误状态码语义化：超大 → 413（Payload Too Large），格式错 / PIL `UnidentifiedImageError` → 415（Unsupported Media Type）。
+
+**Step 4.2 验证（4/4 plan 硬要求 PASS + 3/3 bonus PASS）：**
+
+| # | 测试 | HTTP | 响应 |
+|---|---|---|---|
+| 1 | 上传 `samples/01.png` (1.33 MB) | 200 | `{photo_id, skin_tone:"medium", hand_shape:"average"}` |
+| 2 | 上传 12 MB 文件 | **413** | `{code:413,msg:"file_too_large"}` |
+| 3 | 上传 `.txt` 文件 | **415** | `{code:415,msg:"unsupported_format"}` |
+| 4 | `static/uploads/` 出现 1,337,412 字节的 `<uuid>_<ms>.png` | — | `550e8400-...-440000_1781253827520.png` |
+| 5 (bonus) | form `user_id` ≠ header `X-User-Id` | 400 | `{code:400,msg:"user_id_mismatch"}` |
+| 6 (bonus) | `GET /static/uploads/<file>` 取回字节 | 200 | size=1,337,412（与上传字节完全一致）|
+| 7 (bonus) | 5 张样本（01/05/10/15/17）skin_tone 分布 | — | medium ×3 / dark_warm ×1 / light_warm ×1 → **3 个不同枚举命中**，分析器不是常数 |
+
+**几个设计选择（透明告知）：**
+
+1. **状态码 413 / 415 vs 单一 400**：plan 字面只说 "code=4xx + msg 指明"。语义化更标准（Payload Too Large / Unsupported Media Type），网关与日志层能区分；前端依然只解析 envelope `msg`，零差异。如果未来要统一为 400，改 2 行 HTTPException(status_code) 即可。
+2. **form `user_id` 仅做"redundant safety check"，文件名永远拼 header 值**：plan §4.2 字面要求接收 form `user_id`——可能是 §4.1 X-User-Id 协议确立前的遗留写法。我保留 form 字段做 sanity check（前端两份值不一致暴露 wiring bug），但 path 来源永远是 UUID 校验后的 header；form 字段从不进文件名 → 路径穿越攻击面归零。
+3. **`UnidentifiedImageError` 兜底假图片**：用户用 `.png` 扩展名包裹非图像字节（如 `mv blob.bin blob.png`），PIL 会抛 `UnidentifiedImageError`。包成 415 比走全局 500 用户体验好，且语义贴切（"扩展名对但内容不是图"≈ "不支持的媒体类型"）。其他 PIL 异常（如 DecompressionBombError）当前不特殊处理，会走 500 → `internal_error`，这是 Step 4.2 验收范围外，未来加防御性处理再说。
+4. **`hand_shape="average"` 硬编码**：plan 明确"演示无感"，不做真识别。Step 4.4 推荐算法把它当输入字典字段（`{skin_tone, hand_shape}`），未来如果要加真识别只动 `_analyze_hand` 内部，API 形状不变。
+5. **`_analyze_hand` 留在 user.py 内**：符合 §2.3 约定（C 端逻辑全在 user.py，shared helpers 才提到 services/）。Step 4.4 推荐算法在 `services/recommend.py`——它接受调用方传入的 `hand_features` 字典，不直接 import `_analyze_hand`，所以 Step 4.4 的接口不会依赖本步骤的内部实现。
+6. **warm/cool 阈值 R-B>20**：plan 未规定，凭直觉选 20（不是 30 也不是 10）。验证 7 显示 5 张样本里 17.png 命中 light_warm（R≈220、B≈190、R-B≈30），15.png 命中 dark_warm。如果 demo 上用户视觉判断觉得分类偏离（[feedback_visual_judgment]），调阈值只 1 行。
+
+**给后续开发者的提示：**
+
+- **`hand_features` dict 格式从此被锁定为 `{skin_tone, hand_shape}`**：Step 4.4 推荐算法、Step 4.5 试戴接口都按这两个字段消费。如果未来要加 `nail_length` 或 `finger_ratio` 等真识别字段，三处同步加：`_analyze_hand` 返回字典、推荐算法读取、API 文档（design-docu §6.2）。
+- **`photo_id` 是文件名（含扩展名），不是 hash 或 DB 主键**：当前没有 `photos` 表，photo_id 就是 `static/uploads/<photo_id>` 的 basename。Step 4.5 试戴接口拿 photo_id 去拼 `UPLOAD_DIR / photo_id` 读字节传给 ImageGenProvider。如果未来引入 `photos` 表（带过期清理 / 元数据等），保持 photo_id 字符串形态不变即可，只是多一张 DB 索引表。
+- **`/static/uploads/` 通过 Step 2.4 的 mount 直接对外可访问**：前端可以 `<img src="/static/uploads/<photo_id>" />` 直接展示用户刚上传的图，**不需要单独的下载接口**。隐私层面：UUID-based 文件名是事实上的 capability URL（猜不到别人的 photo_id 就拿不到别人的图），对 demo 够用。生产要严格防越权访问需走签名 URL，超出 demo 范围。
+- **`PIL.Image.open` 对超大图的拒绝**：默认 `MAX_IMAGE_PIXELS = 178956970`（约 178 MP）。我们 10MB 字节上限远低于这个，所以不会触发。但如果未来把上限提到 50MB，可能踩 DecompressionBomb 风险，需要显式设置 `Image.MAX_IMAGE_PIXELS = None` 或者在 try 里 catch `Image.DecompressionBombError`。
+- **`await file.read()` 全量入内存**：10MB 上限下没问题。如果未来引入大文件（视频试戴），改用 `file.stream` 分块写盘 + 异步 hash。当前 demo 不需要。
+- **PIL 调用是 CPU bound**：FastAPI 默认在主事件循环里跑 `def`（同步函数）会 block 其他请求。当前 `_analyze_hand` 几 ms 完成，影响可忽略。如果未来加真识别 → 几百 ms 的 CV 推理，要包 `asyncio.to_thread(_analyze_hand, content)`（参考 Step 3.4 邮件服务里同 smtplib 的处理）。
+- **`UPLOAD_DIR` 计算用 `Path(__file__).parents[2]`**：稳妥指向 `backend/`，无论 CWD 在哪都对。如果有人把 user.py 挪进子目录（如 `routers/api/v1/`），这个层级数要重算。
+
+---
+
 ### 📌 项目锁定状态 + 公约提醒（无需每步更新，状态真变才改）
 
 > 本段是**稳定的锁定状态指针**，不是 step-by-step 的进度条。
