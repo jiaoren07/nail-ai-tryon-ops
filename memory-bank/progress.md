@@ -863,6 +863,46 @@ benchmark 时发现原 `.env` 写的 model ID 在 PPIO 实际不可用 / 不合�
 
 ---
 
+### ✅ Step 4.1 · user_id / gender 前端约定 + X-User-Id 中间件 — 2026-06-12
+
+**做了什么：**
+- `backend/app/main.py` 加全局 HTTP 中间件 `require_user_id`：所有 `/api/...` 路径（除 `/api/health` 和 CORS OPTIONS 预检）必须带合法 UUID 的 `X-User-Id` header，否则直接 `JSONResponse(400, {code:400, msg:"invalid_user_id", data:null})`。`/static/...` 与 `/docs` 不在 `/api/` 前缀下，天然豁免。
+- `backend/app/routers/user.py` 顶部约定注释从"将要校验"升级为权威实现说明：user_id 走 header（UUID v4，前端 sessionStorage 生成）/ gender 走 body（不是 header）/ 后端无 session 表 / main.py 中间件强制 UUID 格式。
+- 验证用的 `/api/_debug/whoami` 临时路由按 plan 要求加 → curl 跑 8 条 → 删除；最终 main.py 路由清单干净（5 标准 + `/api/ping` + `/api/ops/ping` + `/static` + `/api/health`），无 `_debug` 残留。
+
+**Step 4.1 验证（8/8 PASS）：**
+
+| # | 路径 | header | HTTP | 响应 |
+|---|---|---|---|---|
+| 1 | `/api/health` | 无 | 200 | 正常 envelope（豁免）|
+| 2 | `/api/_debug/whoami` | 无 | **400** | `{code:400,msg:"invalid_user_id",data:null}` |
+| 3 | `/api/_debug/whoami` | `not-a-uuid` | **400** | 同上 |
+| 4 | `/api/_debug/whoami` | `550e8400-e29b-41d4-a716-446655440000` | 200 | `{...data:{user_id:"550e8400-..."}}` 回显 |
+| 5 | `/api/ping` | 无 | **400** | 中间件对全 `/api/` 生效 |
+| 6 | `/docs` | 无 | 200 | Swagger UI 正常（非 /api/）|
+| 7 | `/static/styles/f_01_enh.png` | 无 | 200 | 静态文件正常 |
+| 8 | `/api/no_such_route` | 合法 UUID | 404 | `{code:404,msg:"Not Found",data:null}` 走 envelope |
+
+**几个设计选择（透明告知）：**
+
+1. **状态码用 400 而非 401**：plan 字面"4xx"。`invalid_user_id` 是格式校验问题（malformed header），不是鉴权失败；401 暗示"未登录"语义，对匿名身份产品（无 login flow、无 session 表）反而误导。400 Bad Request 最贴。
+2. **CORS OPTIONS 豁免**：浏览器跨域 preflight 不会带自定义 header，不豁免会让前端所有跨域 POST 在 preflight 阶段就挂掉（永远拿不到 200）。
+3. **`AttributeError` 也 catch**：`uuid.UUID(None)` 抛 `AttributeError`（不是 ValueError/TypeError）。少 catch 这个会让 header 完全缺失的请求落进全局 500 handler，前端拿到 `internal_error` 而非 `invalid_user_id`，调试方向被带偏。
+4. **`@app.middleware("http")` 函数装饰器 vs `BaseHTTPMiddleware` 类**：plan 没规定形式，函数装饰器更简洁且是 FastAPI 推荐写法。未来若需要 per-route 豁免列表，再考虑改类形式做更细粒度配置。
+5. **`/api/ping` 与 `/api/ops/ping` 也受中间件保护**：plan §4.1 字面只豁免 `/api/health`，严格遵守。Step 2.3 决定保留 ping 做活体探针，现在调用 ping 需要带 X-User-Id——对开发期 debug 略不便，但接口语义一致更重要。未来若运维要做无 header 的健康检查，应加到 `/api/health` 一个豁免清单里（当前单豁免列表写死 `path != "/api/health"`），不要扩散豁免到 ping。
+
+**给后续开发者的提示：**
+
+- **新增 C 端接口（Step 4.2~4.8）默认就有 `X-User-Id` 守卫**：每个路由都可以无脑 `request.headers["X-User-Id"]` 拿 UUID 字符串，不用再每行 `if not user_id: raise ...`——中间件已经拦在前面。直接拿 `uuid.UUID(...)` 转 UUID 对象也安全。
+- **不要在路由里用 `Header(...)` 依赖把 X-User-Id 挪到参数**：plan 把它定义为协议头不是 query/body 字段；引入 FastAPI Header 依赖会把它显式化为 OpenAPI 文档项的同时，让中间件与依赖项做重复校验，且 FastAPI Header 依赖默认 422 错误不走 envelope。统一从 `request.headers` 拿。
+- **运营端 `/api/ops/...` 接口同样受保护**：当前 design-docu 没规定运营端要独立身份系统，所以运营端调用也带前端生成的 UUID（前端 ops 部分可独立 sessionStorage 命名空间）。如果未来加运营登录系统，再独立鉴权中间件，跟当前的匿名 X-User-Id 中间件做组合。
+- **OpenAPI 文档不显示 X-User-Id 必填**：因为是中间件层校验不是路由参数依赖。Swagger UI "Try it out" 不带 header 会全 400——这是已知现象。如果未来想让 Swagger 自动加 header，可在 `FastAPI(...)` 加 `openapi_extra` 全局 security scheme，但会引入额外样板。**不做**，保持中间件单一职责。
+- **`X-User-Id` 大小写**：HTTP header 名 case-insensitive。我们 `request.headers.get("X-User-Id")` 取的是规范化后的值，前端写 `x-user-id` / `X-USER-ID` 都能识别。Step 4.2~4.8 前端实现保持 `X-User-Id` 规范写法即可。
+- **后端永远不要把 UUID 当主键存 `users` 表**：design-docu §4.2 没有 users 表，是有意为之（匿名 demo）。tryons.user_id 是 VARCHAR 字段直接存 UUID 字符串，不维护外键。要"知道某用户做过哪些事"就 `WHERE user_id = ?` GROUP BY 即可。
+- **`/api/health` 是当前唯一豁免**：未来如果新增"无身份探针"路径（如 `/api/version`），更新中间件的豁免条件即可——但仔细想：要不要新增这种豁免？更倾向于把所有探针塞到 `/api/health` 的 data 字段里，避免豁免清单膨胀。
+
+---
+
 ### 📌 项目锁定状态 + 公约提醒（无需每步更新，状态真变才改）
 
 > 本段是**稳定的锁定状态指针**，不是 step-by-step 的进度条。

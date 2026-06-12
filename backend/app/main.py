@@ -1,9 +1,11 @@
 """FastAPI application entrypoint."""
+import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
@@ -36,6 +38,28 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# Plan §4.1: every /api/... request (except /api/health) must carry a
+# legal UUID v4 in the X-User-Id header. CORS preflight (OPTIONS) is
+# exempt — browsers do not attach custom headers to preflight.
+@app.middleware("http")
+async def require_user_id(request: Request, call_next):
+    path = request.url.path
+    if (
+        path.startswith("/api/")
+        and path != "/api/health"
+        and request.method != "OPTIONS"
+    ):
+        raw = request.headers.get("X-User-Id")
+        try:
+            uuid.UUID(raw)
+        except (ValueError, TypeError, AttributeError):
+            return JSONResponse(
+                status_code=400,
+                content={"code": 400, "msg": "invalid_user_id", "data": None},
+            )
+    return await call_next(request)
 
 # Register on Starlette's HTTPException (parent of fastapi.HTTPException) so
 # StaticFiles 404 + unmatched-route 404 also get the envelope, not the default
