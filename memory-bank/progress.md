@@ -863,35 +863,37 @@ benchmark 时发现原 `.env` 写的 model ID 在 PPIO 实际不可用 / 不合�
 
 ---
 
-### 📍 CHECKPOINT — 2026-06-11（用户准备 /compact 之前）
+### 📍 CHECKPOINT — 2026-06-12（用户第二次 /compact 之前，Phase 3 全部收官后）
 
 **当前位置：**
-- ✅ Phase 0、Phase 1、Phase 2 全部完成
-- ✅ Phase 3 完成 3/4：Step 3.1 (Mock) `fdb121d` / Step 3.2 (Seedream) `c554b23` / Step 3.3 (LLM 服务) `9562680`
-- ⏭ **下一步**：Step 3.4 邮件发送服务（smtplib + HTML wrap，零外部 API key 依赖，主要看 SMTP 账户授权码）
+- ✅ Phase 0、Phase 1、Phase 2、**Phase 3 全部完成**
+- ✅ Phase 3 四步全过：3.1 (Mock) `fdb121d` / 3.2 (Seedream) `c554b23` / 3.3 (LLM) `9562680` / 3.4 (Email) `0f78249`
+- ⏭ **下一步**：**Step 4.1 X-User-Id header 约定 + 全局中间件**（Phase 4 用户端业务接口的起点）
 - 工作树干净，所有改动已 commit
 
-**Step 3.4 实施要点速查**（不展开，详见 [implementation-plan.md](../implementation-plan.md) §3.4）：
-- 文件：`backend/app/services/email.py`
-- 函数：`async def send_email(to, subject, html_body, text_body)`
-- 协议：SMTPS 465 端口，从 `.env` 读 SMTP_HOST / PORT / USER / PASS / FROM
-- HTML 包装规则：680px 宽、Apple System 字体、底部"AI 助手自动生成"，按 [design-docu.md §7.7.4 wrap_html](../design-docu.md) 实现
-- 失败抛 `EmailSendError`，**不静默吞异常**
-- 验证：填好 QQ/163 SMTP 真实授权码 → 发一封冒烟邮件 → 收件箱 30 秒内收到 HTML 渲染正常
-- 跳过条件：SMTP 没就绪可只完成骨架，验证延后
+**Step 4.1 实施要点速查**（不展开，详见 [implementation-plan.md](../implementation-plan.md) §4.1）：
+- 不实现任何业务接口，只做 user_id / gender 前端约定 + 后端校验中间件
+- `routers/user.py` 顶部加 docstring 注释说明：`userId` 由前端生成 UUID v4 写 sessionStorage，每请求带 `X-User-Id` header；`gender` 由前端存 sessionStorage 在请求 body 显式带
+- `main.py` 加全局中间件：`/api/*` 路径（除 `/api/health`、`/docs`、`/openapi.json` 等系统路由）必须带 `X-User-Id` 且是合法 UUID 字符串，否则 `code=4xx, msg="invalid_user_id"`
+- 后端**不维护任何 session 表**
+- 验证：临时 `_debug/whoami` 路由返回 `data.user_id` — 不带 header 应被拒、带合法 UUID 返回该 UUID；验证完删调试路由
+- 大约 15-20 分钟可完成
 
 **重要锁定状态（防被压缩丢失）：**
-- **IMAGE_PROVIDER 走向**：默认 `mock`；切 `seedream` 走 PPIO 的 Seedream 4.5，V1 短 prompt 锁定，prompt 加狠没有可观察改善（Step 3.2 benchmark 烧了 ¥0.945 锁定的结论）
+- **IMAGE_PROVIDER 走向**：默认 `mock`；切 `seedream` 走 PPIO 的 Seedream 4.5，V1 短 prompt 锁定，加狠 prompt 没有可观察改善（Step 3.2 benchmark 烧了 ¥0.945 锁定的结论）
 - **LLM 双档**：quick = `qwen/qwen3-next-80b-a3b-instruct`，strong = `deepseek/deepseek-v4-pro`，timeout=60s 应付 reasoning 模型偶发慢
-- **PPIO key 已经轮换过一次**（用户在对话里贴新 key 换 v4-pro 权限）；旧 key 还有效，用户决定要不要再 revoke
+- **Email**：SMTPS 走 `smtplib.SMTP_SSL` 端口 465，`asyncio.to_thread` 异步化，QQ smtp.qq.com 已实测通过；`wrap_html` 按 design-docu §7.7.4 包装（680px / Apple System / AI 助手脚注）
+- **PPIO key 轮换过 1 次**（Step 3.3 时用户贴新 key 换 v4-pro 权限）；旧 key 还有效，用户决定要不要再 revoke
+- **SMTP 授权码轮换过 1 次**（Step 3.4 时用户暴露旧码、立即在 QQ 控制台重生成、自己手改 `.env`，**AI 从不知道新码**）。建议作为后续 secret rotation 的默认流程
 - **演示数据**：`seed_all.py` 严格幂等（fixed seed=42），三次连跑 12847 tryons / 1432 stats
 - **原型图**：`原型1/` 下 10 张 Board_00~09，gitignored
-- **Phase 4 起点**：第一个真正业务 API 在 Step 4.1（X-User-Id header 约定）后开始
+- **Phase 4 起点已就位**：所有 AI 服务层依赖都搭好了，业务接口可以开始放心写
 
 **给下一个会话（或 /compact 之后）的接续指南：**
-1. 读这一段 + Step 3.3 进度条 → 知道现在在哪
-2. 跑 `git log --oneline -10` → 看最近 commit 详情
-3. 用户说"继续 Step 3.4" → 直接进 §3.4，不需要回顾历史
+1. 读这一段 + Step 3.4 进度条 → 知道现在在哪
+2. 跑 `git log --oneline -10` → 看最近 commit 详情（最近是 `0f78249` Step 3.4）
+3. 用户说"继续 Step 4.1" → 直接进 §4.1，不需要回顾历史
 4. 用户说"问下之前为什么选 X" → 查对应 Step 的 progress 条目（每条都写了"为什么 + 验证 + 给后续开发者的提示"）
+5. **必须遵守**：[CLAUDE.md] 的 "Step-completion gate is human-in-the-loop" + auto memory `feedback_step_by_step_human_gate.md` —— 每步技术验证 PASS 后**停下等用户显式 OK** 才 commit + 进下一步，**绝不自动推进**
 
 ---
