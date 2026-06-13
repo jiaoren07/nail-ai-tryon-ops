@@ -1,122 +1,46 @@
-import { useState } from 'react'
-import reactLogo from './assets/react.svg'
-import viteLogo from './assets/vite.svg'
-import heroImg from './assets/hero.png'
-import './App.css'
+import { App as AntApp } from "antd";
+import { BrowserRouter, Route, Routes } from "react-router-dom";
+import Placeholder from "./components/Placeholder";
+import { UserProvider } from "./store/UserContext";
 
-function App() {
-  const [count, setCount] = useState(0)
-
+/**
+ * Step 5.1 plumbing: every page is a Placeholder + DebugBar.
+ * Step 5.2 onward replaces them one by one (L0 first).
+ *
+ * Route table mirrors design-docu.md §11.2 verbatim.
+ */
+export default function App() {
   return (
-    <>
-      <section id="center">
-        <div className="hero">
-          <img src={heroImg} className="base" width="170" height="179" alt="" />
-          <img src={reactLogo} className="framework" alt="React logo" />
-          <img src={viteLogo} className="vite" alt="Vite logo" />
-        </div>
-        <div>
-          <h1>Get started</h1>
-          <p>
-            Edit <code>src/App.tsx</code> and save to test <code>HMR</code>
-          </p>
-        </div>
-        <button
-          type="button"
-          className="counter"
-          onClick={() => setCount((count) => count + 1)}
-        >
-          Count is {count}
-        </button>
-      </section>
-
-      <div className="ticks"></div>
-
-      <section id="next-steps">
-        <div id="docs">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#documentation-icon"></use>
-          </svg>
-          <h2>Documentation</h2>
-          <p>Your questions, answered</p>
-          <ul>
-            <li>
-              <a href="https://vite.dev/" target="_blank">
-                <img className="logo" src={viteLogo} alt="" />
-                Explore Vite
-              </a>
-            </li>
-            <li>
-              <a href="https://react.dev/" target="_blank">
-                <img className="button-icon" src={reactLogo} alt="" />
-                Learn more
-              </a>
-            </li>
-          </ul>
-        </div>
-        <div id="social">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#social-icon"></use>
-          </svg>
-          <h2>Connect with us</h2>
-          <p>Join the Vite community</p>
-          <ul>
-            <li>
-              <a href="https://github.com/vitejs/vite" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#github-icon"></use>
-                </svg>
-                GitHub
-              </a>
-            </li>
-            <li>
-              <a href="https://chat.vite.dev/" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#discord-icon"></use>
-                </svg>
-                Discord
-              </a>
-            </li>
-            <li>
-              <a href="https://x.com/vite_js" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#x-icon"></use>
-                </svg>
-                X.com
-              </a>
-            </li>
-            <li>
-              <a href="https://bsky.app/profile/vite.dev" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#bluesky-icon"></use>
-                </svg>
-                Bluesky
-              </a>
-            </li>
-          </ul>
-        </div>
-      </section>
-
-      <div className="ticks"></div>
-      <section id="spacer"></section>
-    </>
-  )
+    <AntApp>
+      <UserProvider>
+        <BrowserRouter>
+          <Routes>
+            <Route path="/" element={<Placeholder code="L0" title="双端入口 Landing" />} />
+            <Route path="/gender" element={<Placeholder code="U0" title="性别选择" />} />
+            <Route path="/upload" element={<Placeholder code="U1" title="手图上传" />} />
+            <Route path="/recommend" element={<Placeholder code="U2" title="智能推荐" />} />
+            <Route path="/browse" element={<Placeholder code="U3" title="款式浏览" />} />
+            <Route path="/compare" element={<Placeholder code="U4" title="多款对比试戴" />} />
+            <Route path="/result/:id" element={<Placeholder code="U5" title="试戴结果" />} />
+            <Route path="/history" element={<Placeholder code="U6" title="试戴历史" />} />
+            <Route path="/ops/overview" element={<Placeholder code="O1" title="运营 · 数据概览" />} />
+            <Route path="/ops/trending" element={<Placeholder code="O2" title="运营 · 爆款看板" />} />
+            <Route path="/ops/cold" element={<Placeholder code="O3" title="运营 · 冷门看板" />} />
+            <Route path="/ops/report" element={<Placeholder code="O4" title="运营 · 报告中心" />} />
+            <Route path="/ops/chat" element={<Placeholder code="O5" title="运营 · AI 助手" />} />
+            <Route path="/ops/styles" element={<Placeholder code="O6" title="运营 · 款式管理" />} />
+            <Route path="/ops/setting" element={<Placeholder code="O7" title="运营 · 设置中心" />} />
+            <Route
+              path="/ops/reports/:id"
+              element={<Placeholder code="RDET" title="运营 · 报告详情" />}
+            />
+            <Route
+              path="*"
+              element={<Placeholder code="404" title="未匹配路径" hint="检查 App.tsx 路由表" />}
+            />
+          </Routes>
+        </BrowserRouter>
+      </UserProvider>
+    </AntApp>
+  );
 }
-
-export default App

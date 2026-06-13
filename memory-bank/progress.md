@@ -1175,6 +1175,50 @@ benchmark 时发现原 `.env` 写的 model ID 在 PPIO 实际不可用 / 不合�
 
 ---
 
+### ✅ Step 5.1 · 前端路由骨架 + 全局 Context — 2026-06-13
+
+**做了什么：**
+- **清理 Vite scaffold cruft**：删 `App.css`、`assets/hero.png`、`assets/react.svg`、`assets/vite.svg`；`index.css` 简化为 Tailwind 三指令 + 极小 base（body 用品牌色 `#faf8f2` / `#111111` 做雏形，等 Step 5.2 接 tech-stack §2.5 完整色板）。
+- **`store/UserContext.tsx`**：`UserProvider` 用 React Context 管 5 字段（`userId / userGender / handFeatures / compareSelection / photoId`）。Provider 初始化时 `crypto.randomUUID()` 写入 sessionStorage（若不存在），`userGender` 切换走 setter 同步 sessionStorage。`useUser()` Hook 在外部消费，无 Provider 直接抛错。
+- **`api/client.ts`**：axios 实例，`baseURL` 从 `VITE_API_BASE` env 读默认 `http://localhost:8000`。Request 拦截器自动注入 `X-User-Id` header（从 sessionStorage 读）。Response 拦截器在 envelope `code !== 0` 或网络错误时调 antd `message.error(msg)`。
+- **`components/Placeholder.tsx` + `DebugBar.tsx`**：每个占位页顶部 `code+title` 黄章 + DebugBar（实时展示 Context 5 字段 + 5 个调试按钮：set female / set male / show userId / probe bad API / reset sessionStorage）+ 16 个路由的 Quick Nav 网格。让用户不打开 DevTools 也能完成 90% 的 plan 验证。
+- **`App.tsx` 重写**：`<AntApp>` + `<UserProvider>` + `<BrowserRouter>` + 16 个 Route 严格按 design-docu §11.2 + 一个 `path="*"` 兜底显示"未匹配路径"。
+- `index.html` 标题改 "美甲 AI 试戴 · Demo"，`lang="zh-CN"`。
+
+**Step 5.1 验证（plan 5/5 PASS）：**
+
+| 验证项 | 实测 |
+|---|---|
+| 1. 16 路径都能渲染占位页 | ✅ 浏览器实测 + curl `/upload` `/ops/setting` 200 |
+| 2. 首次访问 `/` sessionStorage 自动出现合法 UUID `userId` | ✅ DevTools 应用程序→会话存储看到 `userId=4019970b-...` |
+| 3. setUserGender("male") + 刷新仍持久 | ✅ 切到 female → F5 → DebugBar 还是 female |
+| 4. axios 调不存在接口弹 antd 错误提示 | ✅ probe bad API 后右上角红 toast |
+| 5. 任意 API 请求带 `X-User-Id` header | ✅ Network Tab 看 `_does_not_exist` 请求 → Request Headers 有 `x-user-id: <UUID>` 与 sessionStorage 完全一致 |
+| 附加 | `npm run build` 通过（tsc -b + vite build），1523 modules / dist 545 KB |
+
+**几个设计选择（透明告知）：**
+
+1. **不引 vite proxy**：axios 直连 `http://localhost:8000`，跨域走后端 Step 4.1 已经配好的 CORS。代价是浏览器要做一次 OPTIONS 预检（用户截图里能看到 2 行 `_does_not_exist`——上面那行 prefli 200 就是预检）。优点是前后端解耦，不依赖 vite dev server 路径。生产部署时 nginx 反代统一就好。
+2. **Vite 8 默认绑 IPv6 `::1`**：dev server 起来后 `127.0.0.1:5173` 连不上，必须用 `localhost:5173`。坑了我两次（curl 127.0.0.1 失败，换 localhost 200）。验证步骤里显式标注，让后续开发者不踩。如果以后想绑 IPv4，在 vite.config.ts 加 `server.host = "127.0.0.1"`。
+3. **DebugBar 设计目的**：plan §5.1 验证 3/4 字面要求"临时调一次"——意味着用 DevTools console 手动调函数。我把这些做成可视按钮，让用户不学 console 就能验证。Step 5.2 真正实现 L0 时，DebugBar 会被换成 `import.meta.env.DEV` 才渲染（保证生产不出现）；当前 Step 5.1 全部都是占位页所以 DebugBar 永驻是 OK 的。
+4. **`<AntApp>` 包外层而非用静态 `message`**：antd v5 + React 19 推荐 `App.useApp()` 拿 message 实例（context 安全）。但 axios 拦截器在 React 树外，无法用 hook。**我用静态 `message.error()` 简化**——antd 会打 warning 说"static method 在 React 19 下可能丢 context"但功能正常。Step 5.2+ 如果发现 toast 行为有 bug，再迁移到 `useApp()` 方案。
+5. **`compareSelection` / `handFeatures` / `photoId` 不持久化 sessionStorage**：plan §5.1 字面只要求"userId 与 userGender 持久化"。试戴选择和手图特征是单次 session 的工作态，刷新就重置反而更符合 demo "重新开始一次"的语义。如果后续 U6 历史页要持久化收藏列表，那是 localStorage 的事（design-docu §6.7 已说明）。
+6. **`/result/:id` 用动态参数 `:id`**：design-docu §11.2 表里就是 `:id` 形式。Step 5.7 U5 实现时用 `useParams()` 拿。当前占位页 Quick Nav 用 `demo-tryon-id` 字面值跳过去验证路由模式。同理 `/ops/reports/:id` 用 `demo-report-id`。
+7. **不在 axios 拦截器里捕业务级 4xx**：response 拦截器对 `code !== 0` 都弹 toast——包括 400 `invalid_gender` 等用户操作错误。可能造成"用户填错表单也弹红 toast"的体验偏激。Step 5.4 / 5.5 实现真业务页时，需要在 axios 调用处 catch 异常做更友好的页面级提示（取代或抑制全局 toast）。当前阶段足够。
+
+**给后续开发者的提示：**
+
+- **加新页面的路径**：在 `App.tsx` `<Routes>` 里加一行 `<Route path="..." element={<...>} />`，对应组件文件放 `src/pages/user/` 或 `src/pages/ops/`。Step 5.2 起会逐一替换 Placeholder。
+- **加新 Context 字段**：在 `UserContext.tsx` 的 `UserState` 接口加字段 + Provider 里加 `useState` + 把 setter 写进 value object + `useMemo` 依赖里也要加。漏一处会触发 re-render 异常或 stale closure。
+- **加新 API 调用**：从 `api/client.ts` import `api`，直接 `api.post("/api/...", body)`。X-User-Id 自动加。`message.error` 自动弹。组件层只需 try/catch 决定是否要额外页面级提示。
+- **`crypto.randomUUID()` 浏览器兼容**：现代浏览器（Chrome 92+ / Firefox 95+ / Safari 15.4+）都支持，IE 不支持但 demo 不考虑 IE。如果未来要支持老浏览器，用 `uuid` npm 包替换。
+- **`baseURL` env 配置**：当前默认 `http://localhost:8000`。生产部署时在 `.env.production` 里写 `VITE_API_BASE=https://your-domain.com`，build 时打进 bundle。前端代码无需改。
+- **Tailwind config 还没扩品牌 token**：用了 `bg-yellow-300 / bg-yellow-50 / border-yellow-300` 等 Tailwind 内置色。Step 5.2 L0 需要 `bg-brand`（黄品牌色）等自定义 token 时再加 `tailwind.config.js` 的 `theme.extend.colors`。**两端共用 §2.5 色板是公约**，不要单独裸写 hex。
+- **`/ops/*` 路由都是占位**：运营端要等 Phase 6（O1-O6 接口）和 Phase 7（O1-O7 前端）才有真实现。当前点 `/ops/overview` 等都是占位+DebugBar。
+- **Step 5.2 L0 的 "整页布局"**：要替换 `<Placeholder code="L0" />`，独立 Layout 不要带 DebugBar（Step 5.2 progress 应该会移除占位页背景的黄色调试条）。可以在 L0 组件里用 `import.meta.env.DEV && <DebugBar />` 局部保留以备 debug。
+
+---
+
 ### 📌 项目锁定状态 + 公约提醒（无需每步更新，状态真变才改）
 
 > 本段是**稳定的锁定状态指针**，不是 step-by-step 的进度条。
