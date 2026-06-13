@@ -38,7 +38,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db import get_db
+from app.db import async_session_maker, get_db
 from app.models import Style, StyleStats, Tryon
 from app.responses import ok
 from app.services import llm
@@ -494,3 +494,93 @@ async def tryon_endpoint(
         from_module=body.from_module,
     )
     return ok(data=data)
+
+
+# ===== Step 4.7: POST /api/tryon/batch =====
+
+class TryonBatchBody(BaseModel):
+    user_id: str
+    photo_id: str
+    style_ids: list[str]
+    user_gender: str | None = None
+    skin_tone: str | None = None
+    hand_shape: str | None = None
+    from_module: str | None = None
+
+
+_BATCH_MIN = 2
+_BATCH_MAX = 4
+
+
+async def _do_tryon_one_with_own_session(
+    *, user_id: str, style_id: str, photo_id: str,
+    user_gender: str | None, skin_tone: str | None,
+    hand_shape: str | None, from_module: str | None,
+) -> dict:
+    """Wrap _do_tryon in a fresh session + envelope-friendly error capture.
+
+    AsyncSession is not safe for concurrent commits from multiple coroutines;
+    each parallel branch gets its own session so the gather() N-way fan-out
+    has no shared-state risk.
+    """
+    async with async_session_maker() as db:
+        try:
+            data = await _do_tryon(
+                db,
+                user_id=user_id,
+                style_id=style_id,
+                photo_id=photo_id,
+                user_gender=user_gender,
+                skin_tone=skin_tone,
+                hand_shape=hand_shape,
+                from_module=from_module,
+            )
+            return {
+                "style_id": style_id,
+                "status": "ok",
+                "result_url": data["result_url"],
+                "elapsed_ms": data["elapsed_ms"],
+            }
+        except HTTPException as e:
+            return {
+                "style_id": style_id,
+                "status": "failed",
+                "result_url": None,
+                "elapsed_ms": None,
+                "error": str(e.detail),
+            }
+        except Exception as e:  # belt-and-braces: never let one item bring the batch down
+            _log.exception("tryon/batch: unexpected error on style=%s", style_id)
+            return {
+                "style_id": style_id,
+                "status": "failed",
+                "result_url": None,
+                "elapsed_ms": None,
+                "error": "internal_error",
+            }
+
+
+@router.post("/tryon/batch")
+async def tryon_batch_endpoint(
+    body: TryonBatchBody,
+    request: Request,
+):
+    """Plan §4.7: 2-4 concurrent try-ons; per-item failure isolation."""
+    if body.user_id != request.headers["X-User-Id"]:
+        raise HTTPException(400, "user_id_mismatch")
+    if not (_BATCH_MIN <= len(body.style_ids) <= _BATCH_MAX):
+        raise HTTPException(400, "style_ids_count_invalid")
+
+    items = await asyncio.gather(*[
+        _do_tryon_one_with_own_session(
+            user_id=body.user_id,
+            style_id=sid,
+            photo_id=body.photo_id,
+            user_gender=body.user_gender,
+            skin_tone=body.skin_tone,
+            hand_shape=body.hand_shape,
+            from_module=body.from_module or "compare",
+        )
+        for sid in body.style_ids
+    ])
+    return ok(data={"items": items})

@@ -1133,6 +1133,48 @@ benchmark 时发现原 `.env` 写的 model ID 在 PPIO 实际不可用 / 不合�
 
 ---
 
+### ✅ Step 4.7 · 多款对比试戴 POST /api/tryon/batch — 2026-06-13
+
+**做了什么：**
+- [user.py](backend/app/routers/user.py) `POST /api/tryon/batch`：body `{user_id, photo_id, style_ids[], (optional features...)}`，强制 `len(style_ids) ∈ [2, 4]`，超出范围 → 400 `style_ids_count_invalid`。
+- 抽出 `_do_tryon_one_with_own_session(...)` 包装器：每个 style_id 在 **独立 AsyncSession** 里跑 Step 4.6 的 `_do_tryon`。`asyncio.gather` 并发 fan-out N 个分支，sidestep "AsyncSession 并发 commit" 风险（Step 4.6 progress 末尾预判过的潜在坑）。
+- 单款失败 (HTTPException 或任何 Exception) → 该 item 标 `status="failed"` + `error` 字段，**不阻塞其他款**——内部 catch + dict return，永远不让一个失败的分支把整个 batch 带崩。
+- batch 路径 `from_module` 默认 `"compare"`（vs 单款 `/api/tryon` 默认 `"browse"`）——贴 design-docu §6.5 U4 多款对比试戴语义。
+- 新建 [`backend/scripts/_check_tryon_batch_api.py`](backend/scripts/_check_tryon_batch_api.py)：5 case 验证（plan 4/4 + 顺序检查）。
+
+**Step 4.7 验证（plan 4/4 + 顺序检查 = 5/5 PASS + 用户手动确认）：**
+
+| Test | 输入 | 实测 |
+|---|---|---|
+| T1 | 3 valid `[f_01, f_05, f_10]` | 3 ok / 3 distinct result_url / tryons +3 / **elapsed 38、62、37ms** |
+| T2 | `[f_02, ghost_999, m_01]` | `[ok, failed, ok]` / ghost error=`style_not_found` / tryons **+2**（仅 ok 写入）|
+| T3 | 5 ids | 400 `style_ids_count_invalid` |
+| T4 | 1 id | 400 `style_ids_count_invalid` |
+| 隐式 | items 顺序 = 入参顺序 | 全部保持 ✅ |
+
+**并发证据（重点）：** T1 三款独立耗时 38/62/37 ms。串行执行总耗时应 ~137ms，并发执行 ≈ max(38,62,37) = **62ms**——客户端实际感知。`asyncio.gather + 独立 session` 真在并发跑，**Step 4.6 progress 提的 "AsyncSession 并发 commit" 担忧根本没触发**（被独立 session 设计绕开了）。
+
+**几个设计选择（透明告知）：**
+
+1. **每个 `_do_tryon` 独立 session（不共享 db）**：plan §4.7 字面"直接调函数不通过 HTTP 转发"——意指调函数复用 Step 4.6 逻辑，**没**说必须共享 session。AsyncSession 并发 commit 是已知 SQLAlchemy 反模式。我用 `async with async_session_maker():` 每分支独立 session。代价：N 个 SQLite 连接打开（SQLite 默认 WAL 关闭下写入串行，但 2-4 并发量级 < 10ms 串行化损失可忽略）。
+2. **`gather` 内部 catch all → 返回 dict 而非 raise**：`asyncio.gather` 默认任一分支抛异常就取消其他——这违反"单款失败不阻塞"。我在 `_do_tryon_one_with_own_session` 内部 catch 全部异常 → 包成 `{status:"failed", error:...}` dict 返回。`return_exceptions=True` 也是一条路但需要 caller 分类，内部 catch 更显式且把 dict 形状逻辑集中。
+3. **`HTTPException.detail` vs 通用 `internal_error`**：HTTPException 的 `detail` 字段就是我抛的 `"style_not_found"` 等语义化 msg，直接透传。其他 Exception 一律包成 `"internal_error"` 不漏内部细节给前端（跟 Step 2.2 全局 handler 思路一致）。
+4. **`elapsed_ms` 在 ok 项里 / failed 项 None**：每款独立计时（_do_tryon 自带）。前端可显示"f_05 用了 62ms / ghost 失败"。如果 plan §4.7 验证将来加"总耗时"，再加 `batch_elapsed_ms` 字段在 data 顶层即可。
+5. **`style_ids_count_invalid` 同 msg 覆盖 <2 + >4**：plan 只显式要求 >4 的 4xx。我对 <2 也用同 msg——更简洁。如果前端要区分上界/下界给用户友好提示，后续加 `error_detail: "too_many" | "too_few"` 字段无破坏改动。
+6. **`from_module` batch 默认 `compare`**：design-docu §6.5 把多款对比页定义为 U4 模块。单款接口（Step 4.6）默认 `browse`，因为单款入口主要是 U3 浏览页点单卡。前端显式传 `from_module` 则覆盖默认（如"推荐位过来批量试戴"传 `recommend`）。
+7. **T1 用 3 个不同 style_ids，不是同一个 style 3 次**：避免 SQLite 在 `style_stats` 同一行的 UPSERT 串行竞争干扰并发结果。3 个不同 style → 3 行独立 UPSERT，零行级竞争，并发数据干净。如果想测"同款连试 3 次"的边界场景，后续可加 T5。
+
+**给后续开发者的提示：**
+
+- **Phase 5 U4 对比页前端实现**：前端 SSE / WebSocket 渐进展示是 design-docu §6.5 推荐方案，但当前 batch 接口是 **一次性返回所有 items**（gather 等齐才回）。若要做渐进展示，方案 A 改 SSE endpoint（StreamingResponse + asyncio.as_completed）；方案 B 前端 batch 拆成 N 次单款并发请求（Step 4.6 单款接口 + 浏览器 fetch 并发）。**当前接口形态适配方案 B**——前端实现时直接调 N 次 `/api/tryon`，不需要 batch 接口。**那为什么还实现 batch 接口？** 因为 plan §4.7 字面要求，且后端 batch 比前端 N 次请求少一些 round-trip 开销。Phase 5 实现 U4 时再决定走哪条。
+- **AsyncSession 并发 commit 验证**：Step 4.6 progress 末尾担心"gather 下多次 commit 行不行"。本步用独立 session 直接绕开了这个问题，**没有验证过共享 session 多 commit 的真实行为**。如果未来想优化连接池，要先验证。
+- **MockProvider 多分支同 (user, style) 覆盖**：T1 跑完 `cache/<uid>_f_01.png` 等 3 张文件已写盘。下次同样 batch 会覆盖——这是 MockProvider 写死路径的预期行为，Seedream provider 带 ms 时间戳累加。
+- **batch 接口同样受 X-User-Id 中间件保护**：`@router.post("/tryon/batch")` 在 `/api` 前缀下，Step 4.1 中间件覆盖。验证 6/7 隐式经过 header 检查。
+- **失败 item 的 `error` 字段值前端要识别哪些**：当前可能值 = `style_not_found`、`photo_not_found`、`tryon_generation_failed`、`internal_error`。前端展示用文案映射表统一翻译给用户看；不要把英文 error 直接展示。
+- **Phase 4 收官**：C 端 7 个接口全部就位（health / ping / upload / styles / recommend / tryon / tryon batch）+ 数据闭环（tryon → tryons + style_stats UPSERT）可工作。下一步进 Phase 5 前端（8 步）。**Phase 5 开始 demo 视觉效果就有了**——前端连后端能跑完整 L0 → U0 → U1 → U2 → U3 → U4 → U5 主线。
+
+---
+
 ### 📌 项目锁定状态 + 公约提醒（无需每步更新，状态真变才改）
 
 > 本段是**稳定的锁定状态指针**，不是 step-by-step 的进度条。
