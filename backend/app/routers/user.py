@@ -26,6 +26,7 @@ import asyncio
 import json
 import logging
 import time
+from datetime import datetime, timedelta, timezone
 from io import BytesIO
 from pathlib import Path
 
@@ -34,15 +35,18 @@ from PIL import Image, UnidentifiedImageError
 from pydantic import BaseModel
 from sqlalchemy import func as sqlf
 from sqlalchemy import or_, select
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db
-from app.models import Style
+from app.models import Style, StyleStats, Tryon
 from app.responses import ok
 from app.services import llm
+from app.services.image_gen import ImageGenError, get_image_provider
 from app.services.recommend import recommend
 
 _log = logging.getLogger("nail_demo.user")
+_BJT = timezone(timedelta(hours=8))
 
 router = APIRouter(prefix="/api")
 
@@ -364,3 +368,129 @@ async def recommend_endpoint(
             for item, reason in zip(recs, reasons)
         ],
     })
+
+
+# ===== Step 4.6: POST /api/tryon =====
+
+class TryonBody(BaseModel):
+    user_id: str
+    style_id: str
+    photo_id: str
+    user_gender: str | None = None
+    skin_tone: str | None = None
+    hand_shape: str | None = None
+    from_module: str | None = None
+
+
+async def _do_tryon(
+    db: AsyncSession,
+    *,
+    user_id: str,
+    style_id: str,
+    photo_id: str,
+    user_gender: str | None,
+    skin_tone: str | None,
+    hand_shape: str | None,
+    from_module: str | None,
+) -> dict:
+    """Core single-style try-on: validate -> generate -> commit tryon + UPSERT stats.
+
+    Returned dict matches the /api/tryon response shape so Step 4.7's batch
+    endpoint can reuse this without an extra HTTP hop.
+    """
+    style = (
+        await db.execute(
+            select(Style).where(Style.id == style_id).where(Style.is_active == 1)
+        )
+    ).scalar_one_or_none()
+    if style is None:
+        raise HTTPException(404, "style_not_found")
+
+    photo_path = UPLOAD_DIR / photo_id
+    if not photo_path.exists():
+        raise HTTPException(404, "photo_not_found")
+    photo_bytes = photo_path.read_bytes()
+
+    t0 = time.perf_counter()
+    try:
+        provider = get_image_provider()
+        result_url = await provider.generate(user_id, style_id, photo_bytes)
+    except ImageGenError as e:
+        _log.warning("tryon: image-gen failed for style=%s: %s", style_id, e)
+        raise HTTPException(500, "tryon_generation_failed") from e
+
+    # Defaults for optional fields. user_gender derives from the style if the
+    # caller didn't supply one; `both` (none exist today but kept for future)
+    # falls back to female arbitrarily.
+    resolved_gender = (
+        user_gender if user_gender in {"female", "male"}
+        else (style.gender if style.gender in {"female", "male"} else "female")
+    )
+    resolved_skin = skin_tone or "medium"
+    resolved_shape = hand_shape or "average"
+    resolved_module = from_module or "browse"
+
+    new_tryon = Tryon(
+        user_id=user_id,
+        user_gender=resolved_gender,
+        style_id=style_id,
+        skin_tone=resolved_skin,
+        hand_shape=resolved_shape,
+        from_module=resolved_module,
+        is_collected=0,
+    )
+
+    today_bjt = datetime.now(_BJT).date()
+    upsert_stmt = (
+        sqlite_insert(StyleStats)
+        .values(
+            style_id=style_id,
+            stat_date=today_bjt,
+            tryon_count=1,
+            collect_count=0,
+            exposure_count=0,
+            click_count=0,
+        )
+        .on_conflict_do_update(
+            index_elements=["style_id", "stat_date"],
+            set_={"tryon_count": StyleStats.__table__.c.tryon_count + 1},
+        )
+    )
+
+    # Single transaction: tryons INSERT + style_stats UPSERT either both
+    # land or both roll back. AsyncSession is in autobegin mode; commit
+    # at the end seals the unit of work, exception above bubbles to
+    # get_db's `async with` which closes without commit (rollback).
+    db.add(new_tryon)
+    await db.flush()  # populate new_tryon.id
+    await db.execute(upsert_stmt)
+    await db.commit()
+
+    return {
+        "tryon_id": new_tryon.id,
+        "result_url": result_url,
+        "elapsed_ms": int((time.perf_counter() - t0) * 1000),
+    }
+
+
+@router.post("/tryon")
+async def tryon_endpoint(
+    body: TryonBody,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Plan §4.6: single-style try-on + atomic data-loop write."""
+    if body.user_id != request.headers["X-User-Id"]:
+        raise HTTPException(400, "user_id_mismatch")
+
+    data = await _do_tryon(
+        db,
+        user_id=body.user_id,
+        style_id=body.style_id,
+        photo_id=body.photo_id,
+        user_gender=body.user_gender,
+        skin_tone=body.skin_tone,
+        hand_shape=body.hand_shape,
+        from_module=body.from_module,
+    )
+    return ok(data=data)

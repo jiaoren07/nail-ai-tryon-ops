@@ -1088,6 +1088,51 @@ benchmark 时发现原 `.env` 写的 model ID 在 PPIO 实际不可用 / 不合�
 
 ---
 
+### ✅ Step 4.6 · 单款试戴接口 POST /api/tryon + 数据闭环 — 2026-06-13
+
+**做了什么：**
+- [user.py](backend/app/routers/user.py) `POST /api/tryon`：body `{user_id, style_id, photo_id, user_gender?, skin_tone?, hand_shape?, from_module?}` → 校验 style 存在且 `is_active=1` + photo 文件存在 → 调 `get_image_provider().generate(...)` → **单事务**写 tryons + UPSERT style_stats → 返回 `{tryon_id, result_url, elapsed_ms}`。
+- 抽出 `_do_tryon(...)` 内部协程（kwargs-only 签名），Step 4.7 多款对比直接复用——plan §4.7 字面要求"直接调函数不通过 HTTP 转发"。
+- UPSERT 用 `sqlalchemy.dialects.sqlite.insert(...).on_conflict_do_update(index_elements=["style_id","stat_date"], set_={"tryon_count": StyleStats.__table__.c.tryon_count + 1})`——落成 SQL `ON CONFLICT(style_id, stat_date) DO UPDATE SET tryon_count = tryon_count + 1`，与 design-docu §10.3 字面一致。
+- 北京时区 `_BJT` 计算 `today` 与 seed_stats.py / recommend.py 完全对齐（design-docu §4 时区约定）。
+- 错误状态码语义化：style 不存在/已下架 → 404 `style_not_found`；photo 文件丢 → 404 `photo_not_found`；ImageGenError → 500 `tryon_generation_failed`；user_id 不匹配 → 400 `user_id_mismatch`。
+- 新建 [`backend/scripts/_check_tryon_api.py`](backend/scripts/_check_tryon_api.py)：5 步链路 + 3 个负样本路径 = 6/6 自动断言，跑一次会让 DB 真+1（每次跑前看 BEFORE/AFTER 数字对比）。
+
+**Step 4.6 验证（plan 3/3 + 3 负样本 = 6/6 PASS + 用户手动确认）：**
+
+| 步骤 | 实测 |
+|---|---|
+| BEFORE: tryons(f_01)=1356 / today_stats=0 | seed 基线 |
+| upload `samples/01.png` | photo_id=`550e8400-...-440000_1781331232246.png` |
+| POST /api/tryon | tryon_id=12848 / result_url=`/static/cache/<uid>_f_01.png` / elapsed_ms=**28**（MockProvider 文件复制）|
+| GET result_url | 200，1,221,491 字节 ✅ |
+| AFTER: tryons(f_01)=**1357** / today_stats=**1** | **+1/+1 数据闭环关键证据** ✅ |
+| bad style_id `ghost_999` | 404 `style_not_found` ✅ |
+| bad photo_id | 404 `photo_not_found` ✅ |
+| body.user_id ≠ header | 400 `user_id_mismatch` ✅ |
+
+**几个设计选择（透明告知）：**
+
+1. **`_do_tryon` 抽出来给 Step 4.7 复用**：plan §4.7 字面"用 asyncio.gather 并发调用 Step 4.6 的内部逻辑（不通过 HTTP 转发）"。提前抽出避免 4.7 实现时回头改 4.6。签名收紧成 kwargs-only 让 4.7 调用点更可读，调用方必须显式传字段名 → 防止字段顺序错位偷偷传错。
+2. **`flush()` 拿 `tryon_id` 再 commit**：`db.add(new_tryon)` 不立即赋 PK。`await db.flush()` 让 SQLite 分配 autoincrement id 但 **不 commit**——后面 UPSERT 失败也能整体 rollback（virginal SQLite 单文件无并发触发率低，但事务语义对齐 design-docu §10.3 是硬要求）。
+3. **`get_image_provider()` 在 `_do_tryon` 里调（不模块级）**：plan §3.1 的工厂从 `settings.IMAGE_PROVIDER` 读，留给运维"运行时切 mock↔seedream"的可能。如果挪到模块顶层会被 import-time 锁定。代价是每次 tryon 函数调用都查一次 settings——是 dict 查找，可忽略。
+4. **`user_gender` 兜底从 `style.gender` 派生**：plan 字面"可选"。如果 body 没传，从 style 表反推（女款→female，男款→male，both→female）。这样老前端没传也能拿到 NOT NULL 字段；前端 Step 5 实现时显式传 sessionStorage 里的 `userGender`，但兜底逻辑作为防御性后端不依赖前端。
+5. **`is_collected=0` 硬编码**：plan 没说支持"试戴时同时收藏"。Phase 5 的 U5 结果页有独立"收藏"按钮（design-docu §6.6），走另一个 POST 接口。如果以后要合并，让 body 多一个 `is_collected` 可选字段即可。
+6. **UPSERT `set_` 用 `StyleStats.__table__.c.tryon_count + 1`**：dialect-level SQL 表达式。原表达式 `StyleStats.tryon_count + 1` 在 set_ dict 里也成立但显式 `__table__.c` 让意图（"指存量列+1"）更清晰，跟未来读者解释"为什么这里不是 Python +1"的成本更低。
+7. **`elapsed_ms` 仅覆盖 generate() 那段**：不包含 DB 校验 / 事务提交。响应给前端的"试戴耗时"=AI 生成耗时，更贴近用户感知（mock 28ms / Seedream ~50s）。如果未来想区分"总耗时 vs AI 耗时"再加 `total_ms` 字段。
+
+**给后续开发者的提示：**
+
+- **MockProvider 同 (user, style) 多次试戴覆盖文件**：MockProvider 写 `cache/{user_id}_{style_id}.png` 路径写死不带时间戳，再次试戴会覆盖。design-docu §8.1 / Step 3.1 progress 已声明这是"演示安全网"行为。Seedream provider 带 ms 时间戳 → 多次试戴累加文件不覆盖。
+- **真切 Seedream 流程**：`backend/.env` 把 `IMAGE_PROVIDER=mock` 改 `seedream`，重启后端。一次试戴 ~¥0.2 / ~50s。**演示前一天 dry-run 一次确认链路通**。
+- **Step 4.7 多款对比试戴**：用 `asyncio.gather(*[_do_tryon(..., db=...) for sid in style_ids])`。**注意**：每个 `_do_tryon` 会自己 commit，所以并发场景下 9 次 commit 会真的执行。AsyncSession 是否支持 gather 下多次 commit 需要在 Step 4.7 验证。如果失败，方案 B：4.7 自己管理事务（每个 style_id 独立 AsyncSession），方案 C：成功的累积到一个 batch 用一次 commit（违反"单款失败不阻塞"语义）。优先试方案 A。
+- **每次试戴都让 today's `style_stats.tryon_count` +1**：这是 design-docu §1.2 闭环的关键。Step 6.1 之后的 O1 概览看板直接读这个表就能看到秒级更新——演示时用户点几次试戴，运营端 10s 轮询就能看到数字变。
+- **`from_module` 默认 `browse`**：当 C 端从推荐页跳试戴时，前端应主动传 `from_module="recommend"`；对比页传 `from_module="compare"`。**别让前端漏传**——Step 7.3 冷门看板想分析"推荐位的款是不是被试戴了"完全依赖这个字段的真实性。Step 5 前端实现时把这个字段固化到 router state。
+- **404 vs 410 for inactive style**：当前下架款（`is_active=0`）也返回 404 不是 410（Gone）。理由：对 C 端来说"看不到这款"和"完全不存在这款"前端处理一致，没必要细分。运营端将来要做"管理已下架款"接口，单独走 `/api/ops/styles?include_inactive=1` 路径。
+- **PIL `_analyze_hand` 不在试戴接口里跑**：Step 4.2 已把它放在 upload 接口里产出 hand_features，再由前端 Context 持有；试戴接口接收 hand_features 作为 body 字段。这样同一张手图多次试戴只算一次特征，省 CPU。
+
+---
+
 ### 📌 项目锁定状态 + 公约提醒（无需每步更新，状态真变才改）
 
 > 本段是**稳定的锁定状态指针**，不是 step-by-step 的进度条。
