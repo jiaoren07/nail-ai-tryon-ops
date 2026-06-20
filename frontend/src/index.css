@@ -2,6 +2,16 @@
 @tailwind components;
 @tailwind utilities;
 
+/* tech-stack.md §2.5: AI purple lives as CSS var because antd's standard
+   token set doesn't have a "purple" concept; ops-side components reference
+   it via style={{ color: 'var(--ai-purple)' }}. User-side uses Tailwind
+   `text-ai-purple` / `bg-ai-purple` directly. */
+:root {
+  --ai-purple: #7c5cff;
+  --ai-blue: #28a8ff;
+  --ai-wash: #f4f0ff;
+}
+
 html,
 body,
 #root {

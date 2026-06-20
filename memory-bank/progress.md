@@ -1219,6 +1219,53 @@ benchmark 时发现原 `.env` 写的 model ID 在 PPIO 实际不可用 / 不合�
 
 ---
 
+### ✅ Step 5.2 · L0 双端入口（Landing）— 2026-06-13
+
+**做了什么：**
+- **`tailwind.config.js`**：tech-stack §2.5 完整 17 色 token 写进 `theme.extend.colors`（brand/page/card/surface/ink/line/ai/semantic 6 大类）。之后所有用户端组件用 class 表达色（`bg-brand` / `text-ink` / `border-line` / `text-ai-purple` 等），**禁止裸 hex**。
+- **`index.css`** 顶部加 `:root` CSS var（`--ai-purple` / `--ai-blue` / `--ai-wash`）——给 Phase 7 运营端 antd 组件桥接 AI 紫（antd token 表无此概念）。
+- **`pages/user/L0.tsx`** 新建（约 110 行）：完整 L0 落地页，按原型 Board 0 + design-docu §6.0：
+  - Header：黄圆形品牌徽章 + 标题 + 副标题 + 右侧 slogan
+  - Main：标题"请选择你的使用身份" + 两张大圆角卡片（`md:grid-cols-2` 桌面双列，移动端自动堆叠）
+  - 左卡：4:3 hero 显示后端 `/static/styles/f_05_enh.png` + "用户端"黄章 + 三条功能 bullet + 黄色"进入用户端 →" CTA，整卡片 `<Link to="/gender">` 可点
+  - 右卡：4:3 装饰性 div 条形图（黄色 + 1 根 AI 紫 + AI 紫圆点）+ "运营端"黑章 + CTA → `<Link to="/ops/overview">`
+  - Footer：装饰文案
+  - 全程 token-only，零 hex
+- **`App.tsx`**：`/` 从 `<Placeholder code="L0" />` 换 `<L0 />`，其他 15 路由继续 Placeholder。
+- `<img onError>` 兜底：后端 /static 离线时图自动隐藏，整卡片仍可点（导航不依赖图片）。
+
+**Step 5.2 验证（用户浏览器实测 PASS）：**
+
+| 验证项 | 实测 |
+|---|---|
+| `npm run build` 通过 | ✅ 1524 modules / CSS 5.5KB → **10.67KB**（Tailwind 拾起新 token）/ JS 549KB |
+| L0 整页布局符合 Board 0 | ✅ 用户确认（黄章+标题+两张卡片+footer，无 DebugBar）|
+| 左卡 CTA 跳 `/gender` | ✅ |
+| 右卡 CTA 跳 `/ops/overview` | ✅ |
+| 首次访问 / 仍写 userId 入 sessionStorage | ✅（`useUser()` hook 引用保留 ensureUserId 路径）|
+| 色板正确：黄 #FFD100 / 米白页底 / 白卡 / AI 紫 #7C5CFF | ✅ |
+
+**几个设计选择（透明告知）：**
+
+1. **hero 图走后端 `/static`** 而非复制到 `frontend/public/`：演示前必启后端，复制冗余且增加维护点。代价：后端没起来 L0 hero 显示破图——`<img onError>` 兜底隐藏元素，整卡片仍可点击导航，体验不崩。
+2. **右卡装饰图用 Tailwind div 不用真截图**：plan §5.2 字面"先用 placeholder 占位也可"。后期等运营端 Phase 7 真做完，可以截图换上。当前条形图 + AI 紫圆点已经传达"数据看板 + AI"语义，比一张占位图更轻量。
+3. **整卡片 `<Link>` 可点 vs 只按钮可点**：Board 0 的视觉是大卡片 hover 上浮——`<Link>` 包外层让整张卡都是点击热区，符合习惯。键盘可达性：`<Link>` 自带 `tabindex=0` + Enter 触发，无需额外处理。focus ring 用 `focus:ring-brand-light`。
+4. **L0 不引 DebugBar**：plan §5.1 进度笔记预告过——"Step 5.2 L0 是完整页面，无 DebugBar"。`useUser()` hook 引用还在（触发 ensureUserId 副作用），但调试按钮全没。如果未来要在 L0 里临时调试，可以 `import.meta.env.DEV && <DebugBar />` 条件渲染。
+5. **`hover:-translate-y-1 + hover:shadow-xl`** 微动效：避免静止页面感太重。`transition-transform` + `duration-300` 平滑过渡，无 JS。
+6. **右卡顶部 chip 用 `bg-ink text-card`**（黑底白字）而非黄底黑字：让两张卡的视觉区分度更高（左黄右黑），运营端更"严肃"。
+7. **顶部 header `border-b` 用 `border-line`** 而非默认 Tailwind `border-gray-200`：强制走 §2.5 token，避免 token 体系外的灰色蔓延。后续每加一个边框都遵守这个约定。
+
+**给后续开发者的提示：**
+
+- **Step 5.3 U0 性别选择页**：路由 `/gender`。点 L0 左卡 CTA 跳入；用户在这里选 female/male 后写 sessionStorage 跳 `/upload`。Step 5.1 的 DebugBar 现在还在 `/gender` 占位页上——Step 5.3 替换占位时也去掉 DebugBar，跟 L0 一样做完整页面。
+- **加新色 token 流程**：(1) 改 `tech-stack.md §2.5` 加新行 (2) 改 `tailwind.config.js` `theme.extend.colors` 添加 (3) 如果运营端要用，改 `index.css :root` CSS var + 后续 antd ConfigProvider token。三处都要动。
+- **L0 hero 图想换**：改 `pages/user/L0.tsx` 顶部 `HERO_USER` 常量即可。当前用 `f_05_enh.png`——这是 cold-warm 通杀的女款，作为入口印象足够普适。
+- **`@layer` 没加自定义**：tech-stack §2.5 没要求。如果未来发现 hover 状态、focus ring、卡片阴影到处重复，再用 `@layer components` 抽 `.card-base` 等。当前手写 utility class 还能管理。
+- **Tailwind `aspect-[4/3]`** 浏览器兼容：现代浏览器都支持。如果遇到移动端 Safari 旧版有问题，回退用 `pb-[75%] relative` 经典方案。
+- **设计稿的 phone-frame 暂未实现**：Board 0 左卡是手机框样式，我用矩形圆角卡片简化。如果觉得不够"高保真"，可以加一个 `<div className="rounded-[3rem] border-8 border-ink ...">` 把图包起来。Step 5.2 现状就是 plan 要求的最小集，后续可迭代。
+
+---
+
 ### 📌 项目锁定状态 + 公约提醒（无需每步更新，状态真变才改）
 
 > 本段是**稳定的锁定状态指针**，不是 step-by-step 的进度条。

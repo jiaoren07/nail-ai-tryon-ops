@@ -1,6 +1,7 @@
 import { App as AntApp } from "antd";
 import { BrowserRouter, Route, Routes } from "react-router-dom";
 import Placeholder from "./components/Placeholder";
+import L0 from "./pages/user/L0";
 import { UserProvider } from "./store/UserContext";
 
 /**
@@ -15,7 +16,7 @@ export default function App() {
       <UserProvider>
         <BrowserRouter>
           <Routes>
-            <Route path="/" element={<Placeholder code="L0" title="双端入口 Landing" />} />
+            <Route path="/" element={<L0 />} />
             <Route path="/gender" element={<Placeholder code="U0" title="性别选择" />} />
             <Route path="/upload" element={<Placeholder code="U1" title="手图上传" />} />
             <Route path="/recommend" element={<Placeholder code="U2" title="智能推荐" />} />
