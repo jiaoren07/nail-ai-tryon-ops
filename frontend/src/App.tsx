@@ -3,6 +3,7 @@ import { BrowserRouter, Route, Routes } from "react-router-dom";
 import Placeholder from "./components/Placeholder";
 import L0 from "./pages/user/L0";
 import U0 from "./pages/user/U0";
+import U1 from "./pages/user/U1";
 import { UserProvider } from "./store/UserContext";
 
 /**
@@ -19,7 +20,7 @@ export default function App() {
           <Routes>
             <Route path="/" element={<L0 />} />
             <Route path="/gender" element={<U0 />} />
-            <Route path="/upload" element={<Placeholder code="U1" title="手图上传" />} />
+            <Route path="/upload" element={<U1 />} />
             <Route path="/recommend" element={<Placeholder code="U2" title="智能推荐" />} />
             <Route path="/browse" element={<Placeholder code="U3" title="款式浏览" />} />
             <Route path="/compare" element={<Placeholder code="U4" title="多款对比试戴" />} />

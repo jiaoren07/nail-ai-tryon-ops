@@ -1312,6 +1312,55 @@ benchmark 时发现原 `.env` 写的 model ID 在 PPIO 实际不可用 / 不合�
 
 ---
 
+### ✅ Step 5.4 · U1 手图上传页 — 2026-06-13
+
+**做了什么：**
+- **`api/client.ts`** 加 `suppressToast` 配置（TS module 扩展 `AxiosRequestConfig`）：调用方传 `{ suppressToast: true }` 时全局 toast 不触发。U1 用它接管错误文案，避免跟全局 envelope `msg` 双 toast。
+- **`pages/user/U1.tsx`** 新建（~160 行）：U1 手图上传页，路由 `/upload`，按 design-docu §6.2 + plan §5.4 + 原型 Board 1 第 2 屏。
+  - 前置守卫 `useEffect`：`!userGender` 立即 `navigate("/gender", {replace:true})` + `if (!userGender) return null` 防 flash
+  - Top bar：← 返回 /gender + AI 徽章 + 右上当前性别显示
+  - 主体：U1 章 + 标题"AI 帮你看，哪款美甲适合你的手" + 副标
+  - **antd `<Upload.Dragger />`**：accept jpg/png，`beforeUpload` 接管整个流程（type 验 → size ≤10MB 验 → `browser-image-compression` 压 ≤5MB → multipart POST `/api/user/upload` with `{suppressToast: true}` → 写 Context (photoId + handFeatures) → navigate `/recommend`），return false 取消 antd 默认上传行为
+  - 4 张示例图 thumbnail，点击 → fetch → blob → File → 走同一 `handleFile`
+  - uploading 状态：禁用 Dragger + 示例按钮 + 文案改 "AI 正在分析..."
+  - 错误码 → 友好中文映射：`file_too_large→文件超大` / `unsupported_format→格式不支持` / `user_id_mismatch→身份校验失败，请刷新` / 其他→`网络异常，请重试`
+- **示例图同源化（CORS 修复，验证期间发现）**：原版 SAMPLES URL 指向 `http://localhost:8000/static/samples/0X.png`。`<img src>` 缩略图能加载（`<img>` 不走 CORS check），但点击触发的 `fetch().then(r=>r.blob())` 被浏览器 CORS 阻断——FastAPI 的 `CORSMiddleware` 对 `app.mount("/static", StaticFiles(...))` 这种 sub-app mount **不可靠**（已知 Starlette 边缘 case，跟 ASGI 中间件栈与 mount 的交互有关，没深挖）。修法：把 4 张示例图（01-04.png，~5.5MB 总计）从 `backend/static/samples/` 复制到 `frontend/public/samples/`，URL 改成相对路径 `/samples/0X.png`，vite 直接同源服务，零 CORS。**附加红利**：后端离线时示例图仍能显示。
+- `App.tsx`：`/upload` 路由从 Placeholder 换 `<U1 />`。
+
+**Step 5.4 验证（plan 5/5 + 1 hover 效果 + 1 CORS 修复 = 7/7 PASS）：**
+
+| 验证项 | 实测 |
+|---|---|
+| `npm run build` 通过 | ✅ 1593 modules / JS 549→680KB（多 browser-image-compression 库的体积）|
+| 无 userGender 直接访 /upload → 重定向 /gender | ✅ |
+| 拖拽手图 → loading → toast 成功 → 跳 /recommend | ✅ |
+| 点示例图 → 跑通同一链路 | ✅（CORS 修复后） |
+| 拖 .txt → 红 toast "格式不支持，仅支持 JPG / PNG" + 不跳转 | ✅ |
+| 示例图 hover 边框变品牌色 + 阴影 | ✅ |
+| Network Tab 看到 `POST /api/user/upload` 响应 envelope 正常 | ✅ |
+
+**几个设计选择（透明告知）：**
+
+1. **`suppressToast` 配置 vs 直接在 U1 catch**：可以不加 `suppressToast`，让全局 toast 也弹（双 toast 都显示），代价是英文 `file_too_large` 跟中文"文件超大"一起出现，用户体验差。加 `suppressToast` 让 axios 完全静默，由页面 100% 控制文案。后续 Step 5.5 / 5.6 / 5.7 凡是有页面级错误状态的调用都可以这么用。
+2. **`beforeUpload` 包整个流程 + 返回 false**：antd Upload 的设计本意是"组件自己上传到 action URL"，但我们要在上传前压缩、在上传后写 Context + 跳转——比 antd 默认流程多步骤。`beforeUpload` 异步函数包所有逻辑、return false 阻止默认上传，是 antd 官方推荐的"我自己处理"模式。`customRequest` 是另一选，但跟 `beforeUpload` 的执行顺序耦合不直观。
+3. **示例图同源化而非修 CORS**：本来想去修 FastAPI 的 `/static` CORS，但 StaticFiles mount 与 CORS middleware 的交互在 Starlette 里是已知坑，深修可能引出新问题。同源化 (`vite public/`) 是 5 行 PowerShell + 1 行 URL 改动，结果稳定。代价：4 张图重复存（前后端各一份，~5.5MB）+ 数据集变更时两边要同步。当前 demo 数据集冻结，可接受。
+4. **示例图 4 张不是 17 张**：plan §5.4 字面"3-4 张示例图缩略图"。17 张全展示太多 UX 噪音。如果后续想加变化，改 SAMPLES 数组即可。
+5. **`browser-image-compression` 参数 `maxSizeMB: 5, maxWidthOrHeight: 2000`**：后端限 10MB，前端先压到 5MB 留一倍 margin；2000px 长边覆盖绝大多数手机拍照尺寸。如果未来用户传 4K 截屏，2000px 限制会触发降采样，对手部 skin_tone 分析影响可忽略（后端只看中央 100×100 平均 RGB）。
+6. **`<button>` 不是 `<img onClick>` 包示例图**：a11y 优先。`<button>` 自带 tabindex + Enter 触发 + screen reader 可读。屏幕阅读器读 "选择示例图 1" 比读 "图片" 友好。
+7. **`message.success("已识别你的手部特征")`**：成功也给 toast，避免用户疑惑"是不是跳错了"。`/recommend` 出现前给个明确反馈。
+
+**给后续开发者的提示：**
+
+- **Step 5.5 U2 推荐页**：路由 `/recommend`。前置守卫：必须有 photoId + handFeatures，否则回 /upload。调 `POST /api/recommend` body 用 Context 里的 gender + handFeatures。LLM 推荐理由可能 5-6s（PPIO quick 档 batch），需要 loading skeleton 别让页面空白。
+- **`SAMPLES` 数组改长度时**：1) PowerShell 复制对应文件到 frontend/public/samples/  2) 改 U1 的 `[1,2,3,4]` 数组  3) Grid `grid-cols-4` 可能也要改成 `grid-cols-3` 或 `grid-cols-5` 视情况
+- **`browser-image-compression` 在 Web Worker 跑**：`useWebWorker: true` 让压缩不阻塞主线程 (重要 UX)。Edge / Chrome / Safari 都支持。
+- **`fetch()` 不走 axios = 不走拦截器**：示例图的 `fetch(url)` 是浏览器原生 fetch，没有 X-User-Id header，没有 baseURL，没有 toast 拦截。这是有意的：示例图是静态资源，不属于 API 调用。
+- **`AntApp.useApp()` vs 静态 `message`**：U1 用前者（context-safe），axios 拦截器仍用静态 `message`（位于 React 树外无法 hook）。两者在 antd 5 + React 19 下并存 OK。
+- **`POST /api/user/upload` 同一秒重复上传**：当前用 `int(time.time()*1000)` ms 时间戳，理论上两次毫秒内连发会撞文件名。Step 4.2 时 demo 单用户场景无影响，未来加用户量再说。
+- **`frontend/public/samples/` 进 git**：4 PNG 共 ~5.5MB，赛题数据集授权未明，但 `backend/static/samples/` 已经 gitignore（避免 git 体积膨胀）。前端这 4 张是为了 U1 同源化必须本地有的资产，性质类似 build-time fixture。如果担心 git 仓库体积，可以加 `frontend/public/samples/` 到 .gitignore + 把 PowerShell 复制命令加到 `seed_all.py` 末尾。当前先纳入 git，后续再决定。
+
+---
+
 ### 📌 项目锁定状态 + 公约提醒（无需每步更新，状态真变才改）
 
 > 本段是**稳定的锁定状态指针**，不是 step-by-step 的进度条。
