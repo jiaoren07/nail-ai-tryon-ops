@@ -1266,6 +1266,52 @@ benchmark 时发现原 `.env` 写的 model ID 在 PPIO 实际不可用 / 不合�
 
 ---
 
+### ✅ Step 5.3 · U0 性别选择页 — 2026-06-13
+
+**做了什么：**
+- **`pages/user/U0.tsx`** 新建（~110 行）：U0 性别选择页，路由 `/gender`，按 design-docu §6.1 + plan §5.3 + 原型 Board 1 第 1 屏。
+  - Top bar：左 `←` 返回 / + 中央 AI 徽章 + 右上"跳过"按钮（点击 = 选女性，plan §5.3 字面要求）
+  - 主体：U0 灰章 + 标题"先选择你想看的款式方向" + 一行解释副标题（"推荐算法会按性别做硬筛选..."）
+  - 两张卡片 (`md:grid-cols-2`)，桌面双列移动端堆叠：
+    - 左：`/static/styles/f_01_enh.png` + "Female · 25 款" chip + 副标"精致、跳色、法式、纯色..."
+    - 右：`/static/styles/m_01.jpg` + "Male · 15 款" chip + 副标"哑光、冷调、商务、酷感几何系"
+  - 底部小字隐私说明
+- 已选项（userGender 等于该卡）加 `border-brand ring-4 ring-brand-light` 高亮——用户返回 /gender 时能看出之前选的哪个，符合"可随时返回切换"语义。
+- 抽出 `GenderCard` 内部子组件：避免左右两张卡片样式重复维护成本，减少手抖出现"左卡边框对、右卡漏改"的样式漂移。
+- `App.tsx`：`/gender` 路由从 `<Placeholder code="U0" />` 换 `<U0 />`，其他 14 路由继续占位。
+
+**Step 5.3 验证（plan 4/4 + 高亮 1 + 用户实测 PASS）：**
+
+| 验证项 | 实测 |
+|---|---|
+| `npm run build` 通过 | ✅ |
+| 直接访问 `/gender` 无重定向 + 显示两卡片 | ✅ |
+| hover 时卡片 -translate + shadow + hero 图缩放 1.05× | ✅ |
+| 点击"女性" → URL `/upload` + sessionStorage `userGender=female` | ✅ |
+| "跳过"按钮 = 点击"女性" | ✅ |
+| 点击"男性" → URL `/upload` + sessionStorage `userGender=male` | ✅ |
+| 返回 `/gender` 看到之前选项有 brand-light ring 高亮 | ✅ |
+
+**几个设计选择（透明告知）：**
+
+1. **`<button>` 包整卡片，不是 `<Link>`**：跟 L0 的 `<Link>` 模式不同。理由：U0 选完要**先 setUserGender 后 navigate**——需要副作用执行顺序。`<Link>` 只能纯导航。用 `<button onClick>` + `navigate("/upload")` 把"写 Context + sessionStorage + 跳转"放进一个 handler 里，原子化。
+2. **已选 ring 高亮**：plan 没硬要求，但 design-docu §6.1 提到"可随时返回切换"——意味着用户会回来。没高亮就只能瞎猜上次选啥。`ring-4 ring-brand-light` 用品牌色 light 变体，醒目不刺眼。
+3. **"跳过" = 选女性**：plan §5.3 字面要求。这隐含一个产品决策：当用户对性别不在意时，**默认走更大的款式池 + 更主流的视觉**——女款 25 款 vs 男款 15 款 + 女款风格更跳/更"演示出彩"。如果未来想改成"默认 male"或"默认 ask"，改一行 `choose("female")`。
+4. **底部隐私小字**：plan 没要求，但既然产品声明"无账户系统、sessionStorage 关浏览器清除"（CLAUDE.md），主动告知降低用户决策门槛。
+5. **GenderCard 子组件抽内部不外部 `components/`**：U0 专属，没复用诉求。塞 `components/` 是过早抽象。
+6. **chip 用 `"Female · 25 款"` 英中混排**：测试覆盖国际化感 + 数字直观告知"款式池大小"。如果未来产品决定改纯中文"女性 · 25 款"，1 行 props 改动。
+7. **`hero` URL 用 `f_01_enh.png` / `m_01.jpg`** 跟 plan §5.3 字面一致。这两张图都是 stable_hot 角色（Step 1.3 拍板），视觉上是"该性别池的代表款"。
+
+**给后续开发者的提示：**
+
+- **Step 5.4 U1 上传页**：路由 `/upload`。**前置守卫**：进入页面 useEffect 里检查 sessionStorage 的 `userGender`，不存在 `navigate("/gender", { replace: true })`。这点 plan §5.4 字面要求，跟 U0"无守卫"不对称——U0 是入口允许直接进，U1 必须先选过性别。
+- **`Gender` 类型别处复用**：从 `store/UserContext` 导出，Step 5.4/5.5/5.6 都直接 import 这个 type alias，不要在各文件重复 declare `"female" | "male"`。
+- **"跳过"的产品语义可调**：当前是"略过性别选择 = 默认女性"。如果未来产品决定"略过 = 进入混合模式"（同时看男+女），需要新增第三个 gender 值 `"unset"` 或者一个全局 flag，会牵动 recommend.py 的硬筛选逻辑——别轻动。
+- **`crypto.randomUUID()` 在 U0 不调**：userId 是首屏 UserProvider 挂载时已经生成。U0 不重新生成，避免每次进 U0 都换 user id 造成 tryons 数据归因混乱。
+- **HMR 偶尔不刷新 Tailwind 改动**：如果你看到 hover 效果没生效，硬刷新（Ctrl+F5）一次。vite + tailwind 在 css 增量时偶发 stale。
+
+---
+
 ### 📌 项目锁定状态 + 公约提醒（无需每步更新，状态真变才改）
 
 > 本段是**稳定的锁定状态指针**，不是 step-by-step 的进度条。
