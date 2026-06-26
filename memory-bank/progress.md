@@ -1411,6 +1411,56 @@ benchmark 时发现原 `.env` 写的 model ID 在 PPIO 实际不可用 / 不合�
 
 ---
 
+### ✅ Step 5.6 · U3 款式浏览页 — 2026-06-13
+
+**做了什么：**
+- **`pages/user/U3.tsx`** 新建（~300 行）：U3 款式浏览页，路由 `/browse`，按 design-docu §6.4 + plan §5.6 + 原型 Board 2 第 1 屏。
+  - **URL 同步筛选**：`useSearchParams` 双向绑定 5 个 URL 参数（`gender / sort / tags / color / length`），刷新不丢失，可分享链接
+  - Top bar：← 返回 + AI + "款式浏览" + "共 X 款" + **右上 antd Segmented 性别切换**（切换时清空 tags/color/length 只保留 sort）
+  - Filter bar：标签 chip 行（横向滚动 + "清空标签"）+ 排序 / 色调 / 长度 三组 Segmented
+  - 标签池：gender 切换时单独 fetch `size=100` 客户端聚合 top-8 高频，与列表 fetch 解耦（filter 改动不重算 chip 列表）
+  - 主体：2 列移动端 / 4 列桌面 grid（plan 字面"2 列"，桌面端我加到 4 列让画面更丰满，少滚动）
+  - 每张 BrowseCard：方形封面 + 右上 `color_main` 圆点色样（hex 注入 inline `background`）+ 左下"加入对比"chip + 卡底"试这款"黄按钮
+  - 「试这款」无 photoId 时 → warning + 跳 /upload；有的话调 `/api/tryon from_module="browse"` → 跳 /result
+  - 浮动按钮跟 U2 同款（compareSelection.length >= 2 出现）
+  - empty state "没有匹配的款式，换个筛选条件试试？"
+- **修了一个 TS 闭包窄化错误**：`const g = activeGender; if (!g) return;` 后在 async function 内用 g，TS 仍认为 `g: Gender | null`（闭包不跨函数边界传递 narrow）。最终用 `g!` 断言简化——上方已 if-return 过，运行时安全。
+- `App.tsx`：`/browse` 路由从 Placeholder 换 `<U3 />`。
+
+**Step 5.6 验证（plan 4/4 + URL 刷新保持 + 色样圆点 + 用户实测 PASS）：**
+
+| 验证项 | 实测 |
+|---|---|
+| `npm run build` 通过 | ✅ JS 700→721KB |
+| 默认 /browse 显示当前性别所有款 | ✅ female=25 / male=15 |
+| 切排序"最热" → 顺序变化 | ✅（heat_score 同 50，差异来自 id ASC tie-break）|
+| 点击标签 chip → URL 含 tags + 列表过滤 | ✅ 中文 tag 自动 URL 编码 |
+| 勾 ≥2 张 → 浮动按钮 + 跳 /compare | ✅ |
+| 性别切换 → 重置 filters 保留 sort | ✅ tagPool 也重新加载 |
+| F5 刷新 URL 状态保持 | ✅ useSearchParams 双向绑定生效 |
+| 色样圆点显示 color_main | ✅ |
+
+**几个设计选择（透明告知）：**
+
+1. **URL 是 single source of truth**：所有筛选状态从 `searchParams` 派生，组件没单独 useState 维护。优点：F5 / 分享链接 / 浏览器前进后退都自然工作。代价：每次 setSearchParams 触发整页重 render（React Router 行为），filter 改动会重新跑两个 useEffect。当前 40 款数据集量级零感知。
+2. **桌面端 4 列而不是 plan 的 2 列**：plan §5.6 字面"2 列瀑布流"。我做成 `grid-cols-2 lg:grid-cols-4`——4 列让 25 款一屏看完不滚太多，跟 U2 推荐页 3 列形成视觉分层（推荐更大更重要、浏览更紧凑）。如果产品坚持 2 列，改成 `grid-cols-2` 一行修复。
+3. **标签池单独 fetch 不复用主列表**：主列表会随 filter 变化（如选了"极简" → 只剩 2 款），客户端聚合就只有"极简"一个 tag 可选，破坏浏览体验。所以标签池只跟 gender 关联，filter 切换不影响 chip 列表。
+4. **gender 切换清空 tag/color/length**：不同性别 pool 有不同合法标签（女款"法式"vs 男款"哑光"），保留旧 filter 会让结果一定为空。仅保留 sort 是因为 sort 跨性别通用。
+5. **color_main 圆点用 inline style 注入**：跟 U2 的 chip 左边框同理——Tailwind JIT 不能处理动态 hex。这是 Tailwind 项目处理任意色值的标准做法。
+6. **"无 photoId 时点试这款"友好降级**：U3 用户可能没走 /upload 流程直接来浏览（"我先看有什么款再决定要不要试戴"），此时点试这款应该引导他去上传，不是报错。当前 `message.warning("还没上传手图，先去上传") + navigate("/upload")` 是软提示。
+7. **筛选无结果时显示文案不是空白**：empty state 是基本 UX 责任，避免用户以为页面挂了。
+
+**给后续开发者的提示：**
+
+- **Step 5.7 U4 对比试戴**：路由 `/compare`。从 Context.compareSelection 读 style_ids → 调 `POST /api/tryon/batch`（Step 4.7 的接口）→ 渲染 2-4 卡格子，每格显示加载/结果/失败状态。**注意 plan §5.7 字面 2-4 款限制**：Context 里的 compareSelection 数组长度需要在进入 /compare 时校验，超过 4 要截断或提示。
+- **批量试戴失败容错**：plan §5.7 字面"单款失败不阻塞其他款"。后端已实现（Step 4.7），前端要在失败格显示"生成失败"+"重试"按钮（plan 写"点击重试"）。
+- **URL 参数命名一致性**：U3 的 URL 用了 `color` 而非 `color_tone`、`length` 而非 `length_pref`——为了 URL 简洁。后端 API 接收 `color_tone` / `length_pref` 全名，前端在 fetch 时拼成全名。如果未来要做 SSR / 后端读 URL，可以对齐。
+- **标签 chip 横向滚动**：用 `overflow-x-auto` 实现，桌面端鼠标可拖、移动端手指可滑。如果将来标签太多影响美观，可加左右滚动按钮。
+- **`/browse` 不在主导航里**：当前只有 U2 推荐页底部"想看更多？"链接 + 直接 URL 访问能进。如果产品决策要加底部 Tab Bar（Home / 浏览 / 历史），是 Phase 5+ 的事。
+- **性别 override URL 参数**：`/browse?gender=male` 即使 Context 里 userGender=female 也会显示男款。设计目的是让用户在不修改 sessionStorage 的前提下"快速看看另一性别有什么"。但 Context 的 userGender 不变——后续 /upload / /recommend 还是用 Context 值，避免影响推荐算法的"性别硬筛选"。
+
+---
+
 ### 📌 项目锁定状态 + 公约提醒（无需每步更新，状态真变才改）
 
 > 本段是**稳定的锁定状态指针**，不是 step-by-step 的进度条。
