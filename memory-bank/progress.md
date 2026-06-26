@@ -1361,6 +1361,56 @@ benchmark 时发现原 `.env` 写的 model ID 在 PPIO 实际不可用 / 不合�
 
 ---
 
+### ✅ Step 5.5 · U2 智能推荐页 — 2026-06-13
+
+**做了什么：**
+- **`pages/user/U2.tsx`** 新建（~220 行）：U2 智能推荐页，路由 `/recommend`，按 design-docu §6.3 + plan §5.5 + 原型 Board 1 第 3 屏。
+  - **双层守卫**：缺 `userGender` → /gender；缺 `photoId/handFeatures` → /upload。两个 `useEffect` 都在顶部声明完才 early-return null，第二个 useEffect 内部加内置 guard——满足 React hooks-must-run-in-same-order 不变式。
+  - Top bar：← 返回 + AI 徽章 + 标题
+  - 用户特征卡：圆头像 + "AI 为你识别到：" + 后端返回的 `user_summary`（如"女生，浅暖肤色，均衡手型"）+ 右上 AI 紫 chip
+  - 调 `POST /api/recommend` body `{user_id, gender, hand_features}` → 9 卡 `lg:grid-cols-3` 瀑布流
+  - **Loading skeleton**：9 个 `animate-pulse` 灰块占位，避免 LLM batch 3-5s 内白屏
+  - 每张卡：4:3 封面图 + 左上 chip（`borderLeft: 3px solid color_main` 把后端 hex 注入做色块预览）+ 款式名 + 2 行 reason + 「试这款」黄按钮 + 「加入对比」复选框
+  - 「试这款」：调 `POST /api/tryon` 带 `from_module="recommend"` → 拿 `{tryon_id, result_url}` → `navigate('/result/:id', {state: {result_url, style}})` 把数据塞 navigate state 给 Step 5.8 U5 读
+  - 试戴中：该卡按钮 Spin + "AI 生成中..."，其他卡 disabled
+  - 浮动按钮：`compareSelection.length >= 2` 时右下角"对比试戴 (n) →" 点击跳 `/compare`
+  - 底部链接 "想看更多？浏览全部款式 →" 跳 `/browse`
+- `App.tsx`：`/recommend` 从 Placeholder 换 `<U2 />`。
+
+**Step 5.5 验证（plan 4/4 + 视觉色块 + skeleton + 用户实测 = 6/6 PASS）：**
+
+| 验证项 | 实测 |
+|---|---|
+| `npm run build` 通过 | ✅ 1593 modules / JS 700KB / CSS 15.6KB |
+| 3-6 秒内 9 卡片 + 每条 ≤25 字 reason | ✅ skeleton → 真卡片切换 |
+| 勾 3 张 → 浮动按钮 "对比试戴 (3)" | ✅ |
+| 点浮动按钮 → /compare + Context.compareSelection 3 个 id | ✅ DebugBar 实测 |
+| 点「试这款」→ /result/:id + 试戴完成 | ✅ 1-2s 内 mock 完成 + cache/ 新文件 |
+| 卡 chip 左边框颜色 = color_main | ✅ 不同款式颜色区分明显 |
+
+**几个设计选择（透明告知）：**
+
+1. **早期返回 vs hooks 顺序**：第一版我把 `if (!guards) return null` 写在两个 useEffect 之间——hook 顺序违规。修正：所有 useEffect 在顶部声明完才 return null，第二个 useEffect 内部加 `if (!userGender || !photoId || !handFeatures) return;` 内置 guard 防 race。这是 React 项目的常见坑，**条件 return 必须在所有 hooks 之后**。
+2. **navigate state 而非 sessionStorage**：「试这款」跳 /result 时用 `navigate(...,{state:...})` 把 `{result_url, style}` 塞进 history state。优点：组件解耦无需新 API；缺点：F5 刷新 /result/:id 时 state 丢失，Step 5.8 U5 实现时要么加 `GET /api/tryon/:id` 后端接口，要么把 state 也镜像写 sessionStorage。当前阶段先用 navigate state，Step 5.8 时再决定。
+3. **每张卡 Loading 时独立 disable 其他卡**：避免用户点了 A 卡后又点 B 卡引起 race condition（两个并发 tryon 写同一个 sessionStorage 的话）。简单粗暴：`tryingStyleId !== null` 时所有「试这款」disabled。如果未来想"并发多卡试戴"，应该走 /compare 流程，不要在 U2 改。
+4. **`color_main` 用 inline style 注入边框**：Tailwind 无法动态生成 `border-l-[#ABC]` 任意 hex（JIT 模式只在 build 时扫描类名）。需要用 `style={{borderLeft: \`3px solid ${color_main}\`}}` inline 注入。这是 Tailwind 处理动态色值的标准解法。
+5. **`SkeletonGrid` 内嵌在文件而非抽 `components/`**：U2 专属。如果未来 U3/U4 也需要 skeleton，再抽出来。
+6. **`/api/recommend` 在 useEffect 里 fire，没 debounce / cache**：plan §5.5 字面没要求缓存。每次 mount /recommend 都重新请求，是有意的——可以让用户"再生成一次"如果不满意（虽然当前没"重新推荐"按钮）。如果未来加 cache，用 React Query 或 SWR。
+7. **从 U2 直接跳 /compare 不预校验 photoId**：浮动按钮跳过去时不重新校验 photoId 还在不在。Step 5.7 U4 compare 页要做自己的 guard。
+
+**给后续开发者的提示：**
+
+- **Step 5.6 U3 浏览页**：路由 `/browse`，跟 U2 共用 `compareSelection` Context。要支持下拉无限加载（infinite scroll）或分页。
+- **Step 5.7 U4 对比试戴**：从 compareSelection 读 style_ids → 调 `POST /api/tryon/batch` → 流式渲染（plan §6.5 用 SSE，但后端 Step 4.7 实现成普通 JSON，所以前端就 await 整批返回即可）。失败的卡显示"生成失败，点击重试"。
+- **Step 5.8 U5 结果页**：路由 `/result/:id`。`useLocation().state` 读 navigate state 拿 result_url + style。F5 失去 state 时 fallback：要么 `useParams()` 拿 tryon_id 调新加的 `GET /api/tryon/:id`，要么显示"试戴信息已过期，请重新试戴"按钮回 /recommend。
+- **`compareSelection` 不持久化 sessionStorage**：刷新就清空（Step 5.1 决策）。如果用户在 /recommend 勾了 3 张然后 F5，要重勾。这是有意的——避免"上次试戴留下的勾选状态污染本次会话"。
+- **每张卡 `cover_url` 兼容相对/绝对路径**：当前 backend 返回 `/static/styles/<id>.png` 相对路径，Card 组件做了 `startsWith("http") ? url : http://localhost:8000${url}` 兜底。如果未来后端改返回绝对 CDN URL，前端不用改。
+- **rate-limit 边缘 case**：PPIO 当前 5 req/min 限速下，连续访问 /recommend > 5 次/分钟会让所有理由都 fallback 成 "<tag>款，<tail>" 模板（Step 4.5 进度已经详细说过）。演示时不要频繁刷新。
+- **首次 LLM batch 调用偶发慢**：如果 8 秒还没出卡片（超过 skeleton 显示时长），刷新一次让 PPIO warm up。
+- **「试这款」的 elapsed 在 U2 看不到**：mock 是 28ms 实在太快用户感知不到。如果切 Seedream（~50s），需要在 U2 这里加更明显的进度提示（如全屏 Modal 或顶部进度条）。Step 5.8 U5 才有 elapsed_ms 字段展示。
+
+---
+
 ### 📌 项目锁定状态 + 公约提醒（无需每步更新，状态真变才改）
 
 > 本段是**稳定的锁定状态指针**，不是 step-by-step 的进度条。
