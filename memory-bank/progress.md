@@ -1581,6 +1581,55 @@ benchmark 时发现原 `.env` 写的 model ID 在 PPIO 实际不可用 / 不合�
 
 ---
 
+### ✅ Step 6.1 · 数据概览接口 GET /api/ops/overview — 2026-06-28
+
+**做了什么：**
+- **`app/routers/ops.py`** 新加 `GET /api/ops/overview`（~150 行），按 plan §6.1 + design-docu §7.1，**Phase 6 第一个 B 端接口**。
+  - **4 个 KPI** 含 `value` + `diff_percent`：
+    - `tryons_today`：今日 tryons 总数 vs **昨日同时段**（按"零点起经过的秒数"对齐 INT 比较，正确跨小时进位）
+    - `conversion_rate`：collect / tryon 比率，今日 vs 昨日同时段
+    - `active_styles`：当前 `is_active=1` 快照（无历史 → diff_percent=null）
+    - `new_trending_alerts`：占位 0（Step 6.2 owns trending 识别；不在 6.1 重复 rule SQL）
+  - `trend_7d`：7 天 daily tryon 总数，从 `style_stats` 聚合 + 缺失日期 0 backfill 保证 length=7
+  - `style_distribution`：今日 tryons JOIN styles → `style_tags[0]` 作首要标签 → Counter top-6（百分比）
+  - `hourly_heat`：今日 tryons GROUP BY 北京小时 → 24-int 数组（缺失小时 0 backfill）
+  - Beijing 日 / 时筛选用 `strftime(..., 'localtime')` + `date(col,'localtime')`，与 Step 1.5/4.6/5.8 时区约定完全对齐
+  - 聚合 SQL 用 `text(...)` + dict bindparams（ORM 表达式处理 strftime/localtime 太拗口）
+- **`backend/scripts/_check_overview_api.py`**：4 plan 验证 + 3 shape sanity = 7 项断言
+
+**Step 6.1 验证（plan 4/4 + 3 extras = 7/7 PASS）：**
+
+| 验证项 | 实测 |
+|---|---|
+| 4 顶层键齐全（kpis/trend_7d/style_distribution/hourly_heat）| ✅ |
+| `trend_7d.length == 7` | ✅ 含日期 2026-06-22 ~ 06-28 |
+| `hourly_heat.length == 24` | ✅ |
+| `kpis.tryons_today.value` == `SUM(tryon_count) WHERE stat_date=today` | ✅ 都是 34 |
+| KPI dict shape（每项含 value + diff_percent） | ✅ 4/4 |
+| style_distribution 条目 shape | ✅ |
+| conversion_rate ∈ [0, 1] | ✅ 0.0588 |
+
+**几个设计选择：**
+
+1. **`new_trending_alerts` 占位 0 而非提前实现**：Step 6.2 才识别 trending。这里硬编 0 + diff_percent=null。Phase 7 前端可以 `Promise.all([/overview, /trending])` 自己 overlay 数字——比"两接口都跑 trending detection 重复 SQL"干净。Step 6.2 完成后**也不需要回头改 overview**。
+2. **"今日 vs 昨日同时段"用秒级 INT 比较而非字符串比较**：原始 `time(col,'localtime') <= time('now','localtime')` 字符串比较跨小时进位会出错（"09:50" 字符串 > "10:05"）。把秒数算成 INT `h*3600 + m*60 + s` 做数值比较，正确。
+3. **`active_styles` 没 diff_percent**：当前 schema 无历史"昨日 active styles 数"——`is_active` 是当前状态字段不是事件流。要做 diff 得引入历史快照表，过度工程。前端不展示箭头即可（diff_percent=null）。
+4. **`trend_7d` 用 `style_stats` 而非 tryons**：style_stats 已按日聚合好（Step 1.5 seed + Step 4.6 实时 UPSERT），SUM 查询 O(行数)；tryons SUM 是 O(N)。演示数据集小俩等价但 production scale 区别大。
+5. **`style_distribution` 取 `style_tags[0]`**：跟 Step 4.4 推荐 diversity rerank 语义一致。如果未来想"全 tag distribution"（一款多 tag 都计数），改 `for t in tags: counter[t] += 1`。
+6. **`raw text()` SQL vs ORM**：聚合 SQL 用 `text()` 直接写 —— sqlalchemy ORM 表达式处理 strftime/localtime 拗口。dict bindparams 安全无 SQL 注入。
+7. **`Counter.most_common(6)` 取 top-6**：plan 字面"前 6"。如果实际分布不足 6，返回少于 6 条，前端处理即可。
+8. **不分页 / 不接 query 参数**：plan §6.1 字面"不接受查询参数"。如果未来要"按日期范围"，加 `?start=&end=` 即可。
+
+**给后续开发者的提示：**
+
+- **`SUM(tryon_count) WHERE stat_date=today` 与 `COUNT(*) WHERE date(created_at,'localtime')=today` 永远应该相等**：因为每次 Step 4.6 `_do_tryon` 用同一事务 UPSERT。如果验证发现两边数字不等，意味着 Step 4.6 事务原子性失效或 Step 1.5 seed 时间戳偏离。**它是数据闭环健康的体检指标**——Step 6.2 / 6.3 实现时如果加新验证，可以再引用它。
+- **Step 6.2 爆款识别**：plan §6.2 字面"近 3 天复合增长率 ≥ 50% + 近 24 小时试戴 ≥ 50 + 收藏率 ≥ 20%"。从 `style_stats` 聚合分组。Step 1.4 seed 已经留了 2 个 emerging_hot 款（f_09, f_15, m_15）满足这条规则——验证可直接断言"trending 包含这 3 个"。
+- **Step 6.3 冷门**：plan §6.3"近 7 天试戴 ≤ 5 / 点击曝光比 ≤ 2% / 上架超 30 天累计 ≤ 20"。Step 1.4 seed 5 个 `cold` 款应该全部命中。
+- **Phase 7 前端轮询频率**：plan/design 文档没明示，建议 30s（O1 看板）。每 30s 调 /api/ops/overview 一次。如果 demo 现场要"秒级演示用户行为→运营感知"，临时把轮询调 5s。
+- **`kpis.tryons_today` 的 `diff_percent` 为 null**：当昨日同时段为 0（如清晨刚开始一天）会触发 div-by-zero 保护返回 null。前端展示时不显示箭头即可。
+
+---
+
 ### 📌 项目锁定状态 + 公约提醒（无需每步更新，状态真变才改）
 
 > 本段是**稳定的锁定状态指针**，不是 step-by-step 的进度条。
