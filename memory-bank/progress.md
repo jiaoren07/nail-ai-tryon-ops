@@ -1461,6 +1461,53 @@ benchmark 时发现原 `.env` 写的 model ID 在 PPIO 实际不可用 / 不合�
 
 ---
 
+### ✅ Step 5.7 · U4 多款对比试戴页 — 2026-06-28
+
+**做了什么：**
+- **`pages/user/U4.tsx`** 新建（~280 行）：U4 多款对比试戴页，路由 `/compare`，按 design-docu §6.5 + plan §5.7 + 原型 Board 2 第 2 屏。
+  - **四层守卫**：缺 userGender → /gender；缺 photoId/handFeatures → /upload；compareSelection < 2 → 友好 toast + /recommend；compareSelection > 4 → 截断到前 4 + 顶部黄色 notice 解释
+  - Top bar：← 返回 + AI + "对比试戴 N 款并行" + 右侧"清空对比"按钮
+  - **两个并行 fetch** on mount（Promise.all）：`POST /api/tryon/batch`（N 款并发试戴）+ `GET /api/styles?gender=X&size=100`（拿款式元数据 name/cover_url/tags 供 header 缩略图 + 名字展示）
+  - 卡格布局：`grid-cols-1 sm:grid-cols-2 lg:grid-cols-{N}`，N=3 时 3 列，N=2/4 时 2 列（4 款 2×2）
+  - 每张 CompareCard 4 区：
+    - **Header**：黄圆序号 + 款式名 + 标签 + 右侧"原款"小缩略图
+    - **Body（square）**：3 态切换（loading/retrying Spin / ok 大试戴图 / failed ⚠️+错误码+重试按钮）
+    - **Footer**：左侧"Xms 完成" + 右侧"查看大图 →"按钮（只在 ok 时可点，跳 `/result/<id>-from-compare`）
+  - **重试单款失败**：调 `POST /api/tryon`（单款接口），而不是再 batch。retry 不应该重跑成功的款（plan §5.7"单款失败不阻塞"语义）。把那一项的 status 从 failed 改 ok，elapsed_ms 更新。
+- `App.tsx`：`/compare` 路由从 Placeholder 换 `<U4 />`。
+
+**Step 5.7 验证（plan 4/4 + 三种布局 + 用户实测 PASS）：**
+
+| 验证项 | 实测 |
+|---|---|
+| `npm run build` 通过 | ✅ 16.6s |
+| 3 个有效 ids → 3 ok + 3 distinct result_url | ✅ |
+| 5 ids → 截断前 4 + 顶部黄色提示 notice | ✅ |
+| 单款 failed → 重试按钮可重生（用户实测确认） | ✅（验证时用 is_active=0 临时构造 failed 状态） |
+| N=2 / 3 / 4 布局自适应 | ✅（2 列 / 3 列 / 2×2） |
+| "清空对比"清 Context + 跳 /recommend | ✅ |
+| "查看大图"跳 /result/:id（U5 占位） | ✅ |
+
+**几个设计选择（透明告知）：**
+
+1. **`Promise.all` 并行 batch + styles fetch 而不是串行**：两个 fetch 互不依赖（一个要 result，一个要 metadata），并行减少首屏等待。如果 styles 失败但 batch 成功，卡片可用 styleId 兜底展示——降级 UX。
+2. **重试调 `/api/tryon` 而非再 batch**：plan §5.7"单款失败不阻塞"明示"失败项重试"语义只针对失败那一个。再 batch 会让成功的款被重新跑（既浪费又可能改变结果）。单款接口正合适。
+3. **CompareCard 内嵌不抽 `components/`**：U4 专属，跟 U2 BrowseCard 一样原则——按 [feedback_step_by_step_human_gate] 的不为假设需求设计原则。
+4. **`/result/:id-from-compare` 用复合 id 路径而非真 tryon_id**：plan §5.7 字面"跳转到结果页"。但 batch 接口当前响应**不包含 tryon_id**（只有 style_id / status / result_url / elapsed_ms / error），所以无法用真 id 跳。临时方案：路径加 `-from-compare` 后缀 + nav state 带完整数据。Step 5.8 实现 U5 时会从 nav state 读，不依赖 URL 的 id。**TODO**：如果未来 U5 需要 F5 兜底走 backend，要么让 batch 也返回 tryon_id（改 Step 4.7），要么加 `GET /api/tryon/:id`。
+5. **截断 4 的 notice 用 light brand 色而非 warning 红**：UI 不要让用户觉得是错（他们没做错，是上限提示）。`bg-brand-light` 友好。
+6. **`gap-5` 卡格间距**：跟 U2 推荐页对齐保持视觉节奏一致。
+7. **MockProvider 下重试看不出"重做"差异**：MockProvider 文件名是 `<uid>_<sid>.png` 写死路径（Step 3.1），同一 (uid, sid) 重试覆盖同一文件，肉眼看不出 changed。Seedream 下带 ms 时间戳所以每次新 URL。这不是 bug，是 Mock 行为。
+
+**给后续开发者的提示：**
+
+- **Step 5.8 U5 结果页**：路由 `/result/:id`。`useLocation().state` 读 navigate state 拿 `{result_url, elapsed_ms, style}`。F5 失去 state 时 fallback：要么 `GET /api/tryon/:id`（需新加后端），要么显示"试戴信息已过期，请重新试戴"按钮回 /recommend。
+- **`compareSelection > 4` 用户体验改进选项**：当前截断到前 4 + notice。如果未来产品决定"超 4 不让进 /compare"，改 useEffect 守卫的条件即可。
+- **MockProvider 同 (uid, sid) 覆盖文件**：U4 的"原款 thumb" + "试戴结果"在 mock 模式下视觉上一模一样（都是款式封面），不是 bug。Seedream 下会有真合成差异。Demo 时演示这一步效果，建议切 Seedream（IMAGE_PROVIDER=seedream）演示 1 次然后切回。
+- **批量并发对 PPIO 配额的影响**：Seedream 模式下 4 款并发会同时占用 PPIO 4 个 Seedream slot，按 ~¥0.2/次算单页 ¥0.8。演示时控制频率。
+- **`-from-compare` 路径后缀**：是临时 hack 让 URL 有点信息。Step 5.8 实现时如果引入 `GET /api/tryon/:id` 后端接口，可以改成 batch 接口也返回 tryon_id，用真 id 跳。Decoupling 干净。
+
+---
+
 ### 📌 项目锁定状态 + 公约提醒（无需每步更新，状态真变才改）
 
 > 本段是**稳定的锁定状态指针**，不是 step-by-step 的进度条。
