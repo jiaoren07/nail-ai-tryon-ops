@@ -7,6 +7,7 @@ import U1 from "./pages/user/U1";
 import U2 from "./pages/user/U2";
 import U3 from "./pages/user/U3";
 import U4 from "./pages/user/U4";
+import U5 from "./pages/user/U5";
 import { UserProvider } from "./store/UserContext";
 
 /**
@@ -27,7 +28,7 @@ export default function App() {
             <Route path="/recommend" element={<U2 />} />
             <Route path="/browse" element={<U3 />} />
             <Route path="/compare" element={<U4 />} />
-            <Route path="/result/:id" element={<Placeholder code="U5" title="试戴结果" />} />
+            <Route path="/result/:id" element={<U5 />} />
             <Route path="/history" element={<Placeholder code="U6" title="试戴历史" />} />
             <Route path="/ops/overview" element={<Placeholder code="O1" title="运营 · 数据概览" />} />
             <Route path="/ops/trending" element={<Placeholder code="O2" title="运营 · 爆款看板" />} />

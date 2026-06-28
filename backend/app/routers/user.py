@@ -35,6 +35,7 @@ from PIL import Image, UnidentifiedImageError
 from pydantic import BaseModel
 from sqlalchemy import func as sqlf
 from sqlalchemy import or_, select
+from sqlalchemy import update as sql_update
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -438,6 +439,9 @@ async def _do_tryon(
         hand_shape=resolved_shape,
         from_module=resolved_module,
         is_collected=0,
+        # Step 5.8: persist URLs so GET /api/tryon/:id can reconstruct U5.
+        result_url=result_url,
+        photo_id=photo_id,
     )
 
     today_bjt = datetime.now(_BJT).date()
@@ -538,6 +542,9 @@ async def _do_tryon_one_with_own_session(
             return {
                 "style_id": style_id,
                 "status": "ok",
+                # Step 5.8 update: include tryon_id so U4 can navigate to
+                # /result/<real_id> instead of the composite-path hack.
+                "tryon_id": data["tryon_id"],
                 "result_url": data["result_url"],
                 "elapsed_ms": data["elapsed_ms"],
             }
@@ -545,15 +552,17 @@ async def _do_tryon_one_with_own_session(
             return {
                 "style_id": style_id,
                 "status": "failed",
+                "tryon_id": None,
                 "result_url": None,
                 "elapsed_ms": None,
                 "error": str(e.detail),
             }
-        except Exception as e:  # belt-and-braces: never let one item bring the batch down
+        except Exception:  # belt-and-braces: never let one item bring the batch down
             _log.exception("tryon/batch: unexpected error on style=%s", style_id)
             return {
                 "style_id": style_id,
                 "status": "failed",
+                "tryon_id": None,
                 "result_url": None,
                 "elapsed_ms": None,
                 "error": "internal_error",
@@ -584,3 +593,123 @@ async def tryon_batch_endpoint(
         for sid in body.style_ids
     ])
     return ok(data={"items": items})
+
+
+# ===== Step 5.8: GET /api/tryon/:id =====
+
+@router.get("/tryon/{tryon_id}")
+async def get_tryon(
+    tryon_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """Plan §5.8: rebuild U5 result page from a stored tryon row.
+
+    Returns the result image URL, the original hand photo URL (if the
+    upload file is still on disk), and the style metadata. Legacy
+    Step 1.4 seed rows have no result_url / photo_id so they 404 here.
+    """
+    row = (
+        await db.execute(
+            select(Tryon, Style)
+            .join(Style, Tryon.style_id == Style.id)
+            .where(Tryon.id == tryon_id)
+        )
+    ).first()
+    if row is None:
+        raise HTTPException(404, "tryon_not_found")
+    t, s = row
+    if not t.result_url:
+        # Legacy seed row without a real try-on image.
+        raise HTTPException(404, "tryon_has_no_result")
+
+    original_url = f"/static/uploads/{t.photo_id}" if t.photo_id else None
+    return ok(data={
+        "tryon_id": t.id,
+        "user_id": t.user_id,
+        "style_id": t.style_id,
+        "result_url": t.result_url,
+        "original_url": original_url,
+        "is_collected": bool(t.is_collected),
+        "from_module": t.from_module,
+        "skin_tone": t.skin_tone,
+        "hand_shape": t.hand_shape,
+        "created_at": t.created_at.isoformat() if t.created_at else None,
+        "style": {
+            "id": s.id,
+            "name": s.name,
+            "cover_url": s.cover_url,
+            "color_main": s.color_main,
+            "style_tags": json.loads(s.style_tags),
+            "color_tone": s.color_tone,
+            "length_pref": s.length_pref,
+        },
+    })
+
+
+# ===== Step 5.8: POST /api/events/collect =====
+
+class CollectBody(BaseModel):
+    tryon_id: int
+
+
+@router.post("/events/collect")
+async def collect_tryon(
+    body: CollectBody,
+    db: AsyncSession = Depends(get_db),
+):
+    """Plan §5.8: idempotent collect with atomic style_stats.collect_count UPSERT.
+
+    Semantics:
+      1. UPDATE tryons SET is_collected=1 WHERE id=:tid AND is_collected=0
+         - conditional WHERE makes the call idempotent
+      2. If affected_rows > 0, UPSERT style_stats for (style_id, tryon_bjt_date)
+         bumping collect_count by 1
+      3. Both writes in the SAME transaction
+      4. Tryon not found -> 404 tryon_not_found
+      5. Already collected -> code=0, data.changed=false
+    """
+    # Locate the tryon first (for 404 + style_id + bjt_date below)
+    tryon = (
+        await db.execute(select(Tryon).where(Tryon.id == body.tryon_id))
+    ).scalar_one_or_none()
+    if tryon is None:
+        raise HTTPException(404, "tryon_not_found")
+
+    # Idempotent conditional UPDATE
+    upd = await db.execute(
+        sql_update(Tryon)
+        .where(Tryon.id == body.tryon_id)
+        .where(Tryon.is_collected == 0)
+        .values(is_collected=1)
+    )
+    if upd.rowcount == 0:
+        # Already collected — no stats bump, surface idempotent response
+        await db.commit()
+        return ok(data={"changed": False, "tryon_id": body.tryon_id, "style_id": tryon.style_id})
+
+    # First-time collect → bump style_stats.collect_count on the tryon's Beijing date.
+    # tryon.created_at is naive but semantically UTC (per models._utcnow).
+    created_utc = tryon.created_at
+    if created_utc.tzinfo is None:
+        created_utc = created_utc.replace(tzinfo=timezone.utc)
+    bjt_date = created_utc.astimezone(_BJT).date()
+
+    upsert_stmt = (
+        sqlite_insert(StyleStats)
+        .values(
+            style_id=tryon.style_id,
+            stat_date=bjt_date,
+            tryon_count=0,
+            collect_count=1,
+            exposure_count=0,
+            click_count=0,
+        )
+        .on_conflict_do_update(
+            index_elements=["style_id", "stat_date"],
+            set_={"collect_count": StyleStats.__table__.c.collect_count + 1},
+        )
+    )
+    await db.execute(upsert_stmt)
+    await db.commit()
+
+    return ok(data={"changed": True, "tryon_id": body.tryon_id, "style_id": tryon.style_id})

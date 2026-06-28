@@ -23,6 +23,7 @@ import { useUser } from "../../store/UserContext";
 interface BatchItem {
   style_id: string;
   status: "ok" | "failed";
+  tryon_id: number | null;
   result_url: string | null;
   elapsed_ms: number | null;
   error?: string;
@@ -144,6 +145,7 @@ export default function U4() {
               ? {
                   style_id: styleId,
                   status: "ok",
+                  tryon_id: r.data.data.tryon_id,
                   result_url: r.data.data.result_url,
                   elapsed_ms: r.data.data.elapsed_ms,
                 }
@@ -170,10 +172,11 @@ export default function U4() {
   }
 
   function viewResult(item: BatchItem, meta: StyleMeta | undefined) {
-    if (item.status !== "ok" || !item.result_url) return;
-    // Mirror U2's pattern: stash data in nav state so U5 can render
-    // without a second fetch. Step 5.8 will decide F5-fallback strategy.
-    navigate(`/result/${item.style_id}-from-compare`, {
+    if (item.status !== "ok" || !item.result_url || item.tryon_id == null) return;
+    // Step 5.8 made batch return real tryon_id; navigate to the canonical
+    // /result/:tryon_id path. Nav state is the fast hydration; if missing
+    // U5 falls back to GET /api/tryon/:id.
+    navigate(`/result/${item.tryon_id}`, {
       state: {
         result_url: item.result_url,
         elapsed_ms: item.elapsed_ms,

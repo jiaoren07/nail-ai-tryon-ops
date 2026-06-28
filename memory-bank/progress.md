@@ -1508,6 +1508,79 @@ benchmark 时发现原 `.env` 写的 model ID 在 PPIO 实际不可用 / 不合�
 
 ---
 
+### ✅ Step 5.8 · U5 单款结果页 + GET /api/tryon/:id + POST /api/events/collect — 2026-06-28
+
+**做了什么（chunky step：1 schema 迁移 + 2 后端路由 + 1 前端页 + U4 配套改）：**
+
+### Backend
+- **`app/models/__init__.py`**：`Tryon` 新加 2 个可空列 `result_url: str | None` + `photo_id: str | None`（老 Step 1.4 seeded 行为 NULL，新 tryons 写时填）。
+- **`backend/scripts/_migrate_add_tryon_url_columns.py`**：一次性 ALTER TABLE 脚本（PRAGMA 幂等），已对 `nail_demo.db` 跑成功。`create_all` 不动已存在表的 schema，所以需要手写 ALTER；下次有人删 db 走 seed_all.py 时 create_all 会带新列，迁移就不需要再跑。
+- **`_do_tryon`**：写新 Tryon 时填 `result_url=result_url` + `photo_id=photo_id`。
+- **`_do_tryon_one_with_own_session`（batch）**：响应新加 `tryon_id` 字段（ok 项是真 id，failed 项 None）——之前 batch 响应少这字段是 U4 用复合路径 `<sid>-from-compare` hack 的根因，现在可以走真 `/result/<id>`。
+- **`GET /api/tryon/:id`**（新路由，plan §5.8 字面）：JOIN styles 返回 11 字段（tryon_id, user_id, style_id, result_url, original_url, is_collected, from_module, skin_tone, hand_shape, created_at, style{}）。404 区分 `tryon_not_found`（行不存在）/ `tryon_has_no_result`（老 seed 行无 result_url）。
+- **`POST /api/events/collect`**（新路由，plan §5.8 字面 + 数据闭环关键）：
+  - body `{tryon_id: int}`
+  - **单事务原子**：
+    1. `UPDATE tryons SET is_collected=1 WHERE id=:tid AND is_collected=0` —— WHERE 条件是幂等防重复的核心
+    2. 若 `upd.rowcount > 0`，UPSERT `style_stats.collect_count += 1` on (style_id, bjt_date)
+  - 404 `tryon_not_found` / 200 `data.changed=false`（已收藏） / 200 `data.changed=true`（首次收藏）
+  - `tryon.created_at` 是 naive UTC，转 Beijing date 用 `_BJT` 时区
+- **`_check_collect_api.py`**：10 步链路验证（含 BEFORE/AFTER snapshot + 幂等 + 404）
+
+### Frontend
+- **`pages/user/U5.tsx`** 新建（~290 行）：
+  - **三层 fallback 加载**：① nav state（U2/U3/U4 同会话跳转）② GET `/api/tryon/:id`（F5 / 深链兜底）③ 错误占位（友好区分 `tryon_not_found` / `tryon_has_no_result` / `invalid_tryon_id`）
+  - 顶部款式 header：色样方块（color_main inline 注入）+ 名 + 标签 + #tryon_id + U5 章
+  - **对比滑块** `react-compare-image`：左原图 / 右试戴图 / 中间黄色 slider line + handle 拖拽。无 original_url 时降级为单图全屏
+  - 5 操作按钮（plan §5.8 完整覆盖）：
+    - **保存**：`fetch result_url → blob → <a download>` 触发下载
+    - **分享**：`navigator.clipboard.writeText(window.location.href)`
+    - **收藏**：调 `/api/events/collect`，前端 disabled 防重复，置灰文案 "已收藏 ✓"
+    - **换一款**：`navigate("/recommend")`
+    - **找店预约**：占位 toast
+- **`pages/user/U4.tsx`** 改：batch 现在返回真 `tryon_id`，`viewResult` 改用真 id 跳 `/result/<id>` —— 之前的 `<sid>-from-compare` 复合路径 hack 干掉
+- **`types/react-compare-image.d.ts`**：最小 TS 类型 shim（npm 包没带 .d.ts，TS 严格模式报错）
+- **`App.tsx`**：`/result/:id` 路由从 Placeholder 换 `<U5 />`
+
+### 关键 fix（验证期间用户发现）
+- **U5 nav state 不带 original_url**：U2/U3 用 `r.data.data` 的 spread 给 nav state，而 POST `/api/tryon` 响应**只有** `{tryon_id, result_url, elapsed_ms}` 没 original_url，所以滑块走了"无原图"降级分支。修法：U5 加 `const { photoId: ctxPhotoId } = useUser()`，无 original_url 时 fallback `/static/uploads/${ctxPhotoId}`（同会话 Context 总有 photoId）。三层降级：backend → context → 空。
+
+**Step 5.8 验证（plan §5.8 5/5 PASS + backend 10/10 + 用户实测 PASS）：**
+
+| Plan 验证 | 实测 |
+|---|---|
+| 完成单款试戴后跳 /result/:id，看到主图与对比滑块 | ✅（修 nav state fallback 后）|
+| 点收藏 → 按钮置灰 + 文案 "已收藏" + `is_collected=1` | ✅ |
+| 同时 today's `collect_count +1` | ✅（_check_collect_api.py 自动验证 step 5） |
+| 再点同一 tryon_id → `collect_count` 不再增加（幂等） | ✅（_check_collect_api.py step 7-8 + `changed=false`） |
+| 点分享 → 剪贴板有当前 URL | ✅（手动验证） |
+| `npm run build` 通过 | ✅ 14.1s |
+| MockProvider 演示局限承认 | ✅（用户看出"原图 vs 款式图"，按设计文档 Mock 行为，不切 Seedream 演示）|
+
+**几个设计选择（透明告知）：**
+
+1. **`result_url` + `photo_id` 加成可空列而不是另起 `tryon_results` 关联表**：plan §5.8 没明示存储设计。开新表是更"干净"的关系建模，但 demo 单事务 + 每行 1:1 关系 + 查询永远 JOIN —— 直接拍 tryons 同行更简单。代价：legacy seed 行 NULL，需要 GET 路由判断兜底。
+2. **POST `/api/tryon` 响应**不补 `original_url` 字段**：tryon 输入有 photo_id 就够了，前端能从 Context 拿 photoId 自己构造。少改一个接口的兼容代价。Step 5.5/5.7 的 U2/U3/U4 不用动响应反序列化。
+3. **`POST /api/events/collect` 不要 X-User-Id 业务校验**：只校验中间件级 UUID 合法（Step 4.1 已有），不校验 tryon.user_id 是否匹配 header user_id。demo 无 auth，且谁能拿到 tryon_id 就允许 collect。生产要加 `WHERE id=:tid AND user_id=:uid` 防越权。
+4. **`changed: bool` 字段给前端 idempotent 信号**：前端可以分别处理"首次收藏 → 成功 toast"vs"重复 → 静默"。当前我用同 toast 文案，但保留这字段方便未来 UX 分化。
+5. **`_check_collect_api.py` 写在 `scripts/` 下划线开头**：跟 `_check_*_api.py` 系列一致，commit 入仓但不参与运行时。pytest 不会自动收集。
+6. **U5 三层 fallback 加载顺序 nav state → API → error**：nav state 是 0ms 路径（同会话单转跳）；GET API 是兜底（F5、deep-link）；错误占位是次要 UX。用户感知最优。
+7. **`react-compare-image` 类型 shim 而非 `@ts-ignore`**：宽 shim（minimal props subset）让 TS 严格通过，未来其他页面调用 `ReactCompareImage` 也能拿提示。`@ts-ignore` 是手抖型 fix。
+8. **collect_count UPSERT 用 `StyleStats.__table__.c.collect_count + 1` SQL 表达式**：跟 Step 4.6 `tryon_count + 1` 完全同模式，让两个 +1 路径代码一致。
+
+**给后续开发者的提示：**
+
+- **MockProvider 演示局限**：`/result/<id>` 看到"原手图 vs 款式图"看似 bug 实则 mock 行为。要看真 AI 合成切 `IMAGE_PROVIDER=seedream` 重启。design-docu §8.1 明示。本次用户决定"信任 Step 3.2 benchmark 不切 Seedream"——后续要演示真合成必须切。
+- **演示前必跑 `seed_all.py`**：reset 数据库 + seed_styles + seed_tryons + seed_stats。但**别忘了同步重跑迁移**：删 db 之后 create_all 会带新列（models 已更新），不需要再跑 `_migrate_add_tryon_url_columns.py`；只在跨 commit 时遇到老 db schema 需要迁移。
+- **Phase 5 用户端 8 步全完成**：L0→U0→U1→U2→U3→U4→U5 全部走通+联调。U6 历史页（design-docu §6.7）是 P2，sessionStorage 存最近 10 条试戴，先跳过。
+- **下一步 Phase 6 运营端接口（O1-O7）**：plan §6 共 ~7 步。后端跑通后再 Phase 7 接前端运营端。
+- **数据闭环现在已完整工作**：用户 /result 收藏 → `collect_count` 实时 +1 → 运营端 Phase 6 的 O1/O2 接口 SELECT 这表 → 演示"用户行为 ↔ 运营秒级感知"已经有底层支撑。
+- **`is_collected` 字段一旦置 1 不能撤销**：当前 collect 接口不支持取消。如果产品要"取消收藏"功能，新加 `POST /api/events/uncollect`（对称 logic：is_collected=0 + collect_count -= 1）。
+- **U5 nav state 形态**：`{result_url, elapsed_ms, style}`。如果未来 U4/U2/U3 跳 U5 时想多传字段（如 original_url 显式），更新调用点同时也加 U5 typed deserializer。
+- **`react-compare-image` 视觉细节**：sliderLineColor 用了 brand 黄，handleSize=36。如果想做大改（如改竖向 vertical），改 props 即可。
+
+---
+
 ### 📌 项目锁定状态 + 公约提醒（无需每步更新，状态真变才改）
 
 > 本段是**稳定的锁定状态指针**，不是 step-by-step 的进度条。

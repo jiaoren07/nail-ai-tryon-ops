@@ -54,6 +54,11 @@ class Tryon(Base):
     from_module: Mapped[str]
     is_collected: Mapped[int] = mapped_column(default=0)
     created_at: Mapped[datetime] = mapped_column(default=_utcnow)
+    # Step 5.8: persist the try-on artifact URLs so GET /api/tryon/:id can
+    # rebuild the U5 page. Both are nullable for legacy Step 1.4 seeded
+    # rows (which carry no real result image / source photo).
+    result_url: Mapped[str | None] = mapped_column(default=None)
+    photo_id: Mapped[str | None] = mapped_column(default=None)
 
 
 class StyleStats(Base):
