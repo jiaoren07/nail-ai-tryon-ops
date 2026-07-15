@@ -1630,6 +1630,63 @@ benchmark 时发现原 `.env` 写的 model ID 在 PPIO 实际不可用 / 不合�
 
 ---
 
+### ✅ Step 6.2 · 爆款识别接口 GET /api/ops/trending — 2026-06-28
+
+**做了什么：**
+- **预处理 reseed**：seed 锚点是 2026-06-07（3 周前），emerging_hot spike 数据已过期。跑 `seed_all.py` 让锚点重新对齐到当天，spike 落在 06-24~06-28。
+- **`app/routers/ops.py`** 加 `GET /api/ops/trending`（~120 行），按 plan §6.2 + design-docu §7.2。
+  - **3 条规则全部满足才命中**：
+    - 近 3 天 vs 前 3 天 growth_rate ≥ **50%**
+    - 滚动近 24 小时 tryon_count ≥ **50**
+    - 近 3 天 collect_rate ≥ **20%**
+  - 时间窗口用 SQLite `datetime('now','-N days')`（UTC，跟 tryons.created_at 一致）
+  - prev 3d cnt=0 但 recent>0 → growth=inf（视为完全 surge，排到 top）
+  - `_suggest_trending_action(growth, collect_rate, last_24h)` 分档：
+    - growth ≥ 200% → "加入首页推荐位（爆发式增长）"
+    - collect_rate ≥ 30% → "调高推荐排序权重（高收藏意愿）"
+    - last_24h ≥ 100 → "增加曝光，持续监测热度"
+    - 兜底 → "纳入候选池，持续观察"
+  - per-style trend_7d：拉原始 tryons 客户端按 Beijing 日聚合（避开 SQLite IN + date(col,'localtime') 在 GROUP BY 里的怪异行为）
+  - 响应每项含 `{style_id, name, cover_url, trend_7d[7], growth_rate, collect_rate, last_24h_tryons, detected_at, suggested_action}`
+- **`backend/scripts/_check_trending_api.py`**：从 `style_roles.json` 读 emerging_hot 期望集合 → 断言全部在结果里 + stable/cold/long_tail 都不在结果里
+- **`backend/scripts/_diagnose_trending.py`**：查看 recent_3d / prev_3d / last_24h / collect_rate 原始数字，辅助定位"为什么某款没命中"
+
+**Step 6.2 验证（plan 2/2 + shape sanity + 用户手动 PASS）：**
+
+| Style | growth | collect | last_24h | trend_7d | suggested_action |
+|---|---|---|---|---|---|
+| m_15 深色系个性酷炫 | **1.80** | **27.30%** | 156 | `[12, 26, 46, 60, 90, 108, 136]` | 增加曝光，持续监测热度 |
+| f_15 复杂图案跳色几何 | **1.65** | **26.80%** | 143 | `[25, 11, 48, 70, 97, 105, 133]` | 增加曝光，持续监测热度 |
+| f_09 跳色镶钻复杂图案 | **1.44** | **30.90%** | 144 | `[15, 12, 49, 80, 75, 108, 133]` | 调高推荐排序权重（高收藏意愿） |
+
+- ✅ 3/3 emerging_hot 全部命中
+- ✅ 5 stable_hot / 5 cold / 27 long_tail 都不在结果里（其他款 24h tryon 都 < 50）
+- ✅ trend_7d 长度 7 + 明显指数增长曲线
+
+**一次踩坑（用户第一次跑失败）：**
+用户第一次跑验证时 `trending items: 0`。原因：我 22:05 跑的 reseed 锚点是"当时的今天"，之后时间流逝，seed 的"06-28 峰值 tryons"逐渐飘出 24 小时滚动窗口。**教训**：每步验证前先 reseed 是必须的（Step 1.6 progress 已经说过"演示前必跑 seed_all.py"，我实施时应该在汇报里就提示 reseed，让用户 verify 前就跑）。这条教训已加进 forward notes，Step 6.3/6.4 汇报会主动提示 reseed。
+
+**几个设计选择（透明告知）：**
+
+1. **3 个阈值常量 `_TRENDING_MIN_*` 提到顶部**：plan 字面 50% / 50 / 20%。如果未来想让运营调阈值，加 `?growth=&min24=&collect=` query 即可，当前 plan 不要。
+2. **`growth=inf` 转 JSON null + 视为 999 给 action**：`prev_cnt=0` 时数学 division by zero。Inf 不能直接 JSON 序列化。当"definitely surging"对待，排第一 + "爆发式增长" action（999 触发第一档）。
+3. **per-style trend_7d 客户端聚合**：SQLite `date(col,'localtime')` 在 GROUP BY 里 + `style_id IN (...)` + SQLAlchemy ORM expanding bindparam 组合容易踩坑。拉 raw rows Python Counter 聚合，O(N) 但 N 小（trending 款近 7 天几百行）。
+4. **suggested_action 优先级分档**：按"信号强度"递减——爆发增长（growth ≥ 200%）压倒收藏意愿（collect ≥ 30%）压倒持续热度（24h ≥ 100）。同一款只命中最高档。
+5. **`last_24h_tryons` 字段暴露到响应**：plan 字面没要求，但运营看板"为什么这款被识别"很有用。展示原始数字 + 用户自己 sanity check。
+6. **不用 design-docu §7.2 的 WITH CTE 写法**：那个 SQL 设计文档展示用，我拆 4 个 simpler queries 客户端 join。可读性好、single-statement debug 容易。
+7. **不调 LLM 生成建议**：plan 字面"按规则模板生成，无需 LLM"。Step 8 AI 助手才接 LLM。
+8. **`_diagnose_trending.py` 也 commit 入仓**：跟 Step 4.5 `_probe_ppio_quick.py` 一样是"辅助定位问题的工具"，下划线打头、不入 pytest 收集、以后 Step 6.3/6.4 遇到"为什么某款没命中"也能复用同模式改写。
+
+**给后续开发者的提示：**
+
+- **每步 verify 前**先 `python scripts/seed_all.py`：seed 用 today 做锚，若时间飘过某个阈值（3d / 24h / 7d 边界），trending/cold/overview 都会 false-negative。这是**演示前必做**（Step 1.6 progress + CLAUDE.md 已声明），Step 6.x 后续接口更依赖时间窗口所以更容易踩坑。
+- **rate-limit trending 观察**：`GET /api/ops/trending` 是纯 SQL 聚合，无 LLM 调用，无 rate limit 顾虑。可以让 Phase 7 前端 30s 轮询一次或用户主动"刷新"。
+- **Step 6.3 冷门实现前注意**：plan §6.3 三条 OR 规则（近 7 天 ≤ 5 试戴 / 点击曝光比 ≤ 2% / 上架超 30 天累计 ≤ 20）。Step 1.4 seed 5 个 cold 款应全部命中，验证与 6.2 同模式：从 `style_roles.json` 读 cold set，断言子集关系。
+- **Step 6.4 运营动作**：`POST /api/ops/actions` 会改 `styles.display_order` + `is_active`。会**立即影响** `/api/styles` 和 `/api/recommend` 返回结果——demo 时展示"运营做动作 → 用户端立即感知"的秒级闭环。
+- **`_diagnose_trending.py` 复用模板**：如果 Step 6.3 也踩类似的"某款没命中，不知道为什么"坑，照着改成 `_diagnose_cold.py` 5 分钟出结果。
+
+---
+
 ### 📌 项目锁定状态 + 公约提醒（无需每步更新，状态真变才改）
 
 > 本段是**稳定的锁定状态指针**，不是 step-by-step 的进度条。

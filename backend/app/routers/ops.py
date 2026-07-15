@@ -193,3 +193,149 @@ async def overview(db: AsyncSession = Depends(get_db)):
         "style_distribution": style_distribution,
         "hourly_heat": hourly,
     })
+
+
+# ===== Step 6.2: GET /api/ops/trending =====
+
+_TRENDING_MIN_GROWTH = 0.5     # +50% recent vs previous 3-day windows
+_TRENDING_MIN_24H = 50          # >=50 tryons in last rolling 24 hours
+_TRENDING_MIN_COLLECT = 0.20    # >=20% collect rate over recent 3 days
+
+
+def _suggest_trending_action(growth: float, collect_rate: float, last_24h: int) -> str:
+    """Plan §6.2 + design-docu §7.2: rule-based action template, no LLM."""
+    if growth >= 2.0:
+        return "加入首页推荐位（爆发式增长）"
+    if collect_rate >= 0.30:
+        return "调高推荐排序权重（高收藏意愿）"
+    if last_24h >= 100:
+        return "增加曝光，持续监测热度"
+    return "纳入候选池，持续观察"
+
+
+@router.get("/trending")
+async def trending(db: AsyncSession = Depends(get_db)):
+    """Plan §6.2 / design-docu §7.2: identify trending (emerging-hot) styles.
+
+    All three rules must hold:
+      - recent 3d / previous 3d growth_rate >= 50%
+      - rolling last 24h tryons >= 50
+      - recent 3d collect_rate >= 20%
+    """
+    # All four group-by queries run against UTC `created_at`. SQLite's
+    # `datetime('now', ...)` is UTC too, so the windowing is consistent.
+    recent_rows = (await db.execute(text(
+        "SELECT style_id, COUNT(*), "
+        "SUM(CASE WHEN is_collected=1 THEN 1 ELSE 0 END) "
+        "FROM tryons WHERE created_at >= datetime('now','-3 days') "
+        "GROUP BY style_id"
+    ))).all()
+    recent_3d: dict[str, int] = {}
+    recent_3d_coll: dict[str, int] = {}
+    for sid, cnt, coll in recent_rows:
+        recent_3d[sid] = int(cnt)
+        recent_3d_coll[sid] = int(coll or 0)
+
+    prev_rows = (await db.execute(text(
+        "SELECT style_id, COUNT(*) FROM tryons "
+        "WHERE created_at >= datetime('now','-6 days') "
+        "AND created_at < datetime('now','-3 days') "
+        "GROUP BY style_id"
+    ))).all()
+    prev_3d: dict[str, int] = {sid: int(c) for sid, c in prev_rows}
+
+    last24_rows = (await db.execute(text(
+        "SELECT style_id, COUNT(*) FROM tryons "
+        "WHERE created_at >= datetime('now','-1 day') "
+        "GROUP BY style_id"
+    ))).all()
+    last_24h: dict[str, int] = {sid: int(c) for sid, c in last24_rows}
+
+    # Apply rules
+    hits: list[dict] = []
+    for sid, recent_cnt in recent_3d.items():
+        prev_cnt = prev_3d.get(sid, 0)
+        # Growth rate: standard (recent - prev) / prev. If prev is 0 but
+        # recent is non-zero treat as infinity (definitely surging); else 0.
+        if prev_cnt > 0:
+            growth = (recent_cnt - prev_cnt) / prev_cnt
+        else:
+            growth = float("inf") if recent_cnt > 0 else 0.0
+        if growth < _TRENDING_MIN_GROWTH:
+            continue
+        if last_24h.get(sid, 0) < _TRENDING_MIN_24H:
+            continue
+        coll_cnt = recent_3d_coll.get(sid, 0)
+        coll_rate = (coll_cnt / recent_cnt) if recent_cnt > 0 else 0.0
+        if coll_rate < _TRENDING_MIN_COLLECT:
+            continue
+        hits.append({
+            "style_id": sid,
+            "growth_rate": growth,
+            "collect_rate": coll_rate,
+            "last_24h": last_24h.get(sid, 0),
+            "recent_3d": recent_cnt,
+        })
+
+    if not hits:
+        return ok(data={"items": []})
+
+    # Sort by growth_rate desc (Inf naturally sorts to the top)
+    hits.sort(key=lambda x: -x["growth_rate"])
+    style_ids = [h["style_id"] for h in hits]
+
+    # Pull style metadata
+    styles = (
+        await db.execute(select(Style).where(Style.id.in_(style_ids)))
+    ).scalars().all()
+    styles_map = {s.id: s for s in styles}
+
+    # 7-day per-style trend (last 7 Beijing days). Pull raw tryons in window,
+    # aggregate client-side: avoids dialect quirks around date(col,'localtime')
+    # in GROUP BY + the IN clause.
+    seven_days_ago = _today_bjt() - timedelta(days=6)
+    raw_trend = (await db.execute(
+        select(Tryon.style_id, Tryon.created_at)
+        .where(Tryon.created_at >= datetime.now(timezone.utc) - timedelta(days=7))
+        .where(Tryon.style_id.in_(style_ids))
+    )).all()
+    per_style_by_date: dict[str, dict[str, int]] = {sid: {} for sid in style_ids}
+    for sid, ct in raw_trend:
+        if ct.tzinfo is None:
+            ct = ct.replace(tzinfo=timezone.utc)
+        bjt_d = ct.astimezone(_BJT).date().isoformat()
+        per_style_by_date[sid][bjt_d] = per_style_by_date[sid].get(bjt_d, 0) + 1
+
+    now_iso = datetime.now(_BJT).isoformat()
+
+    items = []
+    for h in hits:
+        s = styles_map.get(h["style_id"])
+        if s is None:
+            continue
+        sid_trend = [
+            per_style_by_date[h["style_id"]].get(
+                (seven_days_ago + timedelta(days=i)).isoformat(), 0
+            )
+            for i in range(7)
+        ]
+        # Cap growth_rate displayed to avoid Inf bleeding into JSON
+        gr = h["growth_rate"]
+        gr_out = None if gr == float("inf") else round(gr, 2)
+        items.append({
+            "style_id": s.id,
+            "name": s.name,
+            "cover_url": s.cover_url,
+            "trend_7d": sid_trend,
+            "growth_rate": gr_out,
+            "collect_rate": round(h["collect_rate"], 3),
+            "last_24h_tryons": h["last_24h"],
+            "detected_at": now_iso,
+            "suggested_action": _suggest_trending_action(
+                gr if gr != float("inf") else 999.0,
+                h["collect_rate"],
+                h["last_24h"],
+            ),
+        })
+
+    return ok(data={"items": items})
