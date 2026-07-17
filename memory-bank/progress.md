@@ -1687,6 +1687,49 @@ benchmark 时发现原 `.env` 写的 model ID 在 PPIO 实际不可用 / 不合�
 
 ---
 
+### ✅ Step 6.3 · 冷门预警接口 GET /api/ops/cold — 2026-06-28
+
+**做了什么：**
+- **`app/routers/ops.py`** 加 `GET /api/ops/cold`（~90 行），按 plan §6.3。design-docu §7.3 太简（只 3 行），reason/suggestion 映射我自己按 3 条规则语义设计。
+  - **3 条 OR 规则**（任一命中即视为冷门），按优先级评估，每款只挂一个 reason：
+    - **规则 3**（最重 · 长期死款）：`days_since_listed > 30 AND cumulative_tryons <= 20` → "上架 X 天累计仅 Y 次试戴" + "建议下架或替换为新款设计"
+    - **规则 1**（recent slump）：`recent_7d_tryons <= 5` → "近 7 天试戴极少（X 次）" + "降低推荐位排名，或临时替换封面主图观察"
+    - **规则 2**（visibility problem · 曝光高点击低）：`exposure > 0 AND click/exposure <= 2%` → "曝光高但点击寥寥（点击曝光比 X%）" + "优化封面视觉或替换主图"
+  - **规则 2 加 `ex > 0` 前置**：seed 数据里 exposure_count 永远 > 0，但 real-world 新款可能 ex=0 → ratio=0/0=0 天然 ≤ 2%假阳。加门槛过滤"没数据 ≠ 低点击率"。
+  - 排序：coldest first（recent_7d 升序 + cumulative 升序 tie-break）
+- **`backend/scripts/_check_cold_api.py`**：断言 5 cold 全部命中 + 无 stable_hot 误报 + long_tail 命中数只做信息展示
+
+**Step 6.3 验证（plan 2/2 + shape + ordering + 用户 ALL PASS）：**
+
+| 结果 | 实测 |
+|---|---|
+| 返回 cold items | 13~16 条（边界款受 rolling 24h 窗口影响会 ±3）|
+| 5/5 cold 全部命中 | f_05 f_08 f_11 m_10 m_13 都在里面 ✅ |
+| 0 stable_hot 误报 | 5 stable_hot 无 1 误报 ✅ |
+| 8-11/27 long_tail 也被命中 | 非 failure，plan 未禁止；long_tail 语义就是"低流量长尾"，自然满足 rule 1 |
+| 排序 recent_7d 升序 | m_13 (0) → f_11 (0) → f_08 (1) → ... ✅ |
+| 规则 3 / 2 都没触发 | days=0（刚 reseed created_at=now）；ratios 都 9-20%（远高于 2%）→ 只 rule 1 独扛，符合预期 |
+
+**几个设计选择（透明告知）：**
+
+1. **优先级 rule 3 > rule 1 > rule 2**：rule 3 是"确诊死款"最严重（建议下架），rule 1 是"最近凉"轻一级（建议调低推荐），rule 2 是"运营可救"最轻（建议改封面）。同款只挂一个 reason，前端可以按 reason 分档展示不同颜色 badge。
+2. **long_tail 也被命中不视为 failure**：plan §6.3 验证只要求"5 cold 命中"+ "无 stable_hot 误报"，没禁 long_tail。事实上 long_tail 27 款分摊 bucket-global 5-40/日，per-style 大约 1-3/日，7 天累计 2-5 次——**天然满足 rule 1**。这是 seed 分配的自然产物不是 bug。产品上"long_tail 也是需要运营关注的冷门候选"这个语义合理。
+3. **不 cap 数量返回全部**：plan 没限。前端可以自己截断展示 top-10。
+4. **规则 3 seed 数据永远不命中**：seed_styles.py 让所有 style.created_at = seed 时的 now，days_listed 永远 = 0。要触发 rule 3 需要手动 backdate 某款的 created_at。plan 没要求测这条规则，所以不加数据 fixture。这不是 bug——real-world 数据自然会有 30 天以上的老款，触发 rule 3。
+5. **规则常量 `_COLD_*` 提到顶部**：跟 Step 6.2 `_TRENDING_*` 一致模式，方便运营调阈值。
+6. **不写 `_diagnose_cold.py`**：Step 6.2 已经写过 `_diagnose_trending.py`，模式一样。cold 规则调整后想 debug 某款没命中，照 trending 模板改就 5 分钟出结果。
+7. **`cumulative_tryons` 字段也暴露到响应**：plan 字面响应里没列，但前端展示"这款一共被试过多少次"很有用——运营决定"到底要不要真下架"时是关键 signal。
+
+**给后续开发者的提示：**
+
+- **每步验证前必 reseed**：跟 Step 6.2 教训一样。cold 用了 3 个时间窗口（7d, cumulative, listed >30d），任一窗口相对 seed 时间飘一点就有边界款进出。**demo 前 30 分钟 reseed** 是硬性纪律。
+- **rate-limit / 无 LLM 顾虑**：`GET /api/ops/cold` 纯 SQL，Phase 7 前端可以自由轮询。
+- **Step 6.4 运营动作**：`POST /api/ops/actions` 是 Phase 6 数据闭环的**收口**——运营看到冷门/爆款后做的动作（boost / demote / offline）应该立刻反映到 C 端 `/api/styles` `/api/recommend` 结果。Step 6.4 完成后就能演示"运营点一下 → 用户端秒感知"的完整闭环。
+- **long_tail 也标 cold 可能是产品讨论点**：如果运营嫌"每次看到 15+ 个冷门款太多"，可以：(a) 提高 rule 1 阈值到 3；(b) 分层展示（rule 3 严重 / rule 1 中等 / rule 2 轻微）；(c) 前端加 "只看关键" 筛选。这是 UX 决定不是接口 bug。
+- **cold_reason / suggestion 中文长度**：当前每条 15-30 字左右，够运营看板卡片一行展示。如果加进日报 markdown 直接引用即可。
+
+---
+
 ### 📌 项目锁定状态 + 公约提醒（无需每步更新，状态真变才改）
 
 > 本段是**稳定的锁定状态指针**，不是 step-by-step 的进度条。

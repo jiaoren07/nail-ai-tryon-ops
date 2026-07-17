@@ -339,3 +339,102 @@ async def trending(db: AsyncSession = Depends(get_db)):
         })
 
     return ok(data={"items": items})
+
+
+# ===== Step 6.3: GET /api/ops/cold =====
+
+_COLD_MAX_7D_TRYONS = 5           # rule 1: recent 7d <= 5 tryons
+_COLD_MAX_CLICK_RATE = 0.02       # rule 2: recent 7d click/exposure <= 2%
+_COLD_LISTED_DAYS = 30            # rule 3: listed > 30 days
+_COLD_CUMULATIVE_MAX = 20         # rule 3: cumulative tryons <= 20
+
+
+@router.get("/cold")
+async def cold(db: AsyncSession = Depends(get_db)):
+    """Plan §6.3 / design-docu §7.3: identify cold-warning styles.
+
+    Any single rule hit -> style is cold. Priority for reason/suggestion:
+      rule 3 (long-dead) > rule 1 (recent slump) > rule 2 (viz problem)
+    """
+    # Rule 1: recent 7-day tryons per style
+    r1 = (await db.execute(text(
+        "SELECT style_id, COUNT(*) FROM tryons "
+        "WHERE created_at >= datetime('now','-7 days') "
+        "GROUP BY style_id"
+    ))).all()
+    recent_7d: dict[str, int] = {sid: int(c) for sid, c in r1}
+
+    # Rule 2: recent 7-day click/exposure ratio per style (from style_stats)
+    r2 = (await db.execute(text(
+        "SELECT style_id, SUM(click_count), SUM(exposure_count) "
+        "FROM style_stats "
+        "WHERE stat_date >= date('now','-7 days','localtime') "
+        "GROUP BY style_id"
+    ))).all()
+    ratio_by_style: dict[str, tuple[int, int]] = {
+        sid: (int(ck or 0), int(ex or 0)) for sid, ck, ex in r2
+    }
+
+    # Rule 3: cumulative tryons per style (all-time)
+    r3 = (await db.execute(text(
+        "SELECT style_id, COUNT(*) FROM tryons GROUP BY style_id"
+    ))).all()
+    cumulative: dict[str, int] = {sid: int(c) for sid, c in r3}
+
+    # All active styles + created_at for days_since_listed
+    styles = (
+        await db.execute(select(Style).where(Style.is_active == 1))
+    ).scalars().all()
+
+    now_utc = datetime.now(timezone.utc)
+    items: list[dict] = []
+
+    for s in styles:
+        r7 = recent_7d.get(s.id, 0)
+        ck, ex = ratio_by_style.get(s.id, (0, 0))
+        cex_ratio = (ck / ex) if ex > 0 else 0.0
+        cum = cumulative.get(s.id, 0)
+
+        created = s.created_at
+        if created.tzinfo is None:
+            created = created.replace(tzinfo=timezone.utc)
+        days_listed = (now_utc - created).days
+
+        # Priority evaluation — first matching rule wins for reason/suggestion.
+        # Rule 2 requires ex > 0 to avoid false-positive on brand-new styles
+        # with zero exposure data (ratio computes to 0 which trivially <= 2%).
+        reason: str | None = None
+        suggestion: str | None = None
+
+        rule3_hit = days_listed > _COLD_LISTED_DAYS and cum <= _COLD_CUMULATIVE_MAX
+        rule1_hit = r7 <= _COLD_MAX_7D_TRYONS
+        rule2_hit = ex > 0 and cex_ratio <= _COLD_MAX_CLICK_RATE
+
+        if rule3_hit:
+            reason = f"上架 {days_listed} 天累计仅 {cum} 次试戴"
+            suggestion = "建议下架或替换为新款设计"
+        elif rule1_hit:
+            reason = f"近 7 天试戴极少（{r7} 次）"
+            suggestion = "降低推荐位排名，或临时替换封面主图观察"
+        elif rule2_hit:
+            reason = f"曝光高但点击寥寥（点击曝光比 {cex_ratio:.2%}）"
+            suggestion = "优化封面视觉或替换主图，提升点击意愿"
+
+        if reason is None:
+            continue
+
+        items.append({
+            "style_id": s.id,
+            "name": s.name,
+            "cover_url": s.cover_url,
+            "recent_7d_tryons": r7,
+            "exposure_click_ratio": round(cex_ratio, 4),
+            "days_since_listed": days_listed,
+            "cumulative_tryons": cum,
+            "cold_reason": reason,
+            "suggestion": suggestion,
+        })
+
+    # Order: coldest first (fewest recent 7d, ties broken by lowest cumulative)
+    items.sort(key=lambda h: (h["recent_7d_tryons"], h["cumulative_tryons"]))
+    return ok(data={"items": items})
