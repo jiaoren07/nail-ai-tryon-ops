@@ -1730,6 +1730,59 @@ benchmark 时发现原 `.env` 写的 model ID 在 PPIO 实际不可用 / 不合�
 
 ---
 
+### ✅ Step 6.4 · 运营动作接口 POST /api/ops/actions — 2026-06-28
+
+**做了什么：**
+- **`app/routers/ops.py`** 加 `POST /api/ops/actions`（~60 行），按 plan §6.4。**Phase 6 数据闭环的收口**——运营做动作后 C 端 `/api/styles` 立即感知。
+  - Body：`{style_id, action_type, reason?}` (Pydantic `ActionBody`)
+  - **4 种 action_type**：
+    - `boost`：`display_order := min(active) - 1`（推到最前）
+    - `demote`：`display_order := max(active) + 1`（沉到最后）
+    - `offline`：`is_active := 0`（下架，C 端立刻看不到）
+    - `reorder`：501 `not_implemented`（plan §6.4 明示 defer）
+  - **单事务原子**：styles 表 mutation + ops_actions 表 INSERT 一次提交，保证审计跟改动 1:1
+  - 每条 audit `operator="ai_assistant"`（Step 8 AI 助手将复用同接口，operator 字段留位区分未来"人工运营" vs "AI 助手"）
+  - 响应含 `{action_id, style_id, action_type, display_order, is_active, reason}` 便于前端 optimistic UI update
+  - 错误：非法 action → 400 `invalid_action_type`；不存在款 → 404 `style_not_found`；reorder → 501 `not_implemented`
+- **`backend/scripts/_check_actions_api.py`**：3 plan 硬要求 + 3 negative paths = 6 断言
+
+**Step 6.4 验证（plan 3/3 + 3 negative = 6/6 ALL PASS + 用户手动 OK）：**
+
+| Test | 实测 |
+|---|---|
+| **T1 boost f_15** | 200 · display_order 14 → **-1**（当前 min = 0 → -1）· ops_actions +1 row ✅ |
+| **T2 demote f_10** | 200 · display_order 9 → **40**（当前 max = 39 → 40）✅ |
+| **T3 offline f_25** | 200 · is_active 1 → **0** · `/api/styles` 40 → **39 条**（不含 f_25）✅ |
+| T4 invalid action_type "bogus" | 400 `invalid_action_type` ✅ |
+| T5 reorder | 501 `not_implemented` ✅ |
+| T6 unknown style_id | 404 `style_not_found` ✅ |
+
+**Phase 6 数据闭环完整证据（demo 关键剧本）：**
+- 一次 `POST /api/ops/actions {style_id:f_25, action_type:offline}` 后
+- 立刻 `GET /api/styles` → 40 → 39 条，f_25 消失
+- **运营做动作 → C 端秒感知**（design-docu §1.2 剧本已跑通）
+
+**几个设计选择（透明告知）：**
+
+1. **`display_order` 允许负数**：boost 一次 min-1，再 boost 同款 -2。理论上无限降序。这是"稳定在最前"的正确语义。demo 数据集小无 int 溢出；production 若担心可"每 N 次操作 normalize 一次"。
+2. **boost 一个 offline 款只改 display_order 不改 is_active**：plan 没说 boost 应该顺便 re-activate。保守只动 display_order——一款 offline 说明运营明确不想它出现，误 boost 不该悄悄拉活。要重激活需另发 action（当前 API 无 activate 类型，未来加）。
+3. **`display_order` 全局单一维度**：boost/demote 都动同一列，所有 active 款共享一个大小池。plan §6.4 就是这么设计的，简单可控。缺点是"只在'女款'里 boost"要额外逻辑——demo 阶段够用。
+4. **`operator="ai_assistant"` 硬编码**：plan §6.4 字面。Step 8 AI 助手 function-calling 会调同接口，天然也是 `ai_assistant`。如果未来分"人工运营"vs"AI 助手"，加 body 参数 `operator` 或从 header 派生。
+5. **响应含完整 mutated 后状态**：`display_order` + `is_active` 都返回。前端可以 optimistic 立刻更新 O6 款式管理表格不用刷新。
+6. **不校验业务身份**：只走 Step 4.1 中间件级 UUID 合法性。Ops 端 demo 无鉴权，实际生产要加 admin token check。
+7. **`current_min or 0` 兜底**：如果 active 款 0 个（极端），min 是 None。`or 0` 让 new_order = -1。demo 状态永远有款，理论上不触发。
+8. **验证脚本手动 SQL 查 3 个字段**：`display_order` / `is_active` / `ops_actions` count 都独立 SELECT，避免只信 API 响应字段而不查 DB（response 值可能是内存 mutate 未提交也返回，SQL 查证明真落库）。
+
+**给后续开发者的提示：**
+
+- **Phase 6 后端进度 4/7**：6.1 overview / 6.2 trending / 6.3 cold / **6.4 actions** 完成。剩下 6.5 款式 CRUD / 6.6 AI 助手 / 6.7 报告子系统。
+- **Step 6.5 款式 CRUD 会跟 6.4 交叉**：`PATCH /api/ops/styles/{id}` 手动改 `is_active` 或 `display_order` 时，plan 字面要求"同步写 ops_actions"。逻辑复用 Step 6.4 的 audit 模式，只是入口不同——重构机会：可以抽 `_apply_action_and_audit(...)` 内部函数让两个入口共用。
+- **Phase 8 AI 助手 function calling 直接用本接口**：LLM 会用 tool schema 调 `POST /api/ops/actions`。**当前接口设计已满足** Phase 8 需求，不需要为 AI 再补别的形状。
+- **`GET /api/styles` 隐含数据闭环**：C 端 `/api/styles` 只返回 `is_active=1`，offline 立即生效。**演示前不要 offline 关键款**（如 m_15 emerging_hot 演示主角），否则 C 端推荐 / 浏览会少一款。演示前跑 `seed_all.py` reset 所有 is_active + display_order。
+- **多次同款 boost 后 `display_order` 会跌到很负**：验证反复跑 T1，f_15 会 -1 → -2 → -3 逐步递减。每次 reseed 会 reset 到 seed 时的 0-39。
+
+---
+
 ### 📌 项目锁定状态 + 公约提醒（无需每步更新，状态真变才改）
 
 > 本段是**稳定的锁定状态指针**，不是 step-by-step 的进度条。

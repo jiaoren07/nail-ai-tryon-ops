@@ -14,13 +14,14 @@ import json
 from collections import Counter
 from datetime import date, datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 from sqlalchemy import func as sqlf
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db
-from app.models import Style, StyleStats, Tryon
+from app.models import OpsAction, Style, StyleStats, Tryon
 from app.responses import ok
 
 router = APIRouter(prefix="/api/ops")
@@ -438,3 +439,76 @@ async def cold(db: AsyncSession = Depends(get_db)):
     # Order: coldest first (fewest recent 7d, ties broken by lowest cumulative)
     items.sort(key=lambda h: (h["recent_7d_tryons"], h["cumulative_tryons"]))
     return ok(data={"items": items})
+
+
+# ===== Step 6.4: POST /api/ops/actions =====
+
+_VALID_ACTION_TYPES = {"boost", "demote", "offline", "reorder"}
+
+
+class ActionBody(BaseModel):
+    style_id: str
+    action_type: str  # boost | demote | offline | reorder
+    reason: str | None = None
+
+
+@router.post("/actions")
+async def perform_action(body: ActionBody, db: AsyncSession = Depends(get_db)):
+    """Plan §6.4: unified ops-action entrypoint. Every action (except
+    reorder) atomically mutates styles + appends an ops_actions audit row.
+
+    - boost   : styles.display_order := min(active display_order) - 1
+    - demote  : styles.display_order := max(active display_order) + 1
+    - offline : styles.is_active := 0
+    - reorder : returns 501 not_implemented (plan defers)
+
+    Both the styles mutation and the ops_actions insert are in one
+    transaction, so an audit row is guaranteed to accompany any state
+    change (either both land or both roll back).
+    """
+    if body.action_type not in _VALID_ACTION_TYPES:
+        raise HTTPException(400, "invalid_action_type")
+    if body.action_type == "reorder":
+        raise HTTPException(501, "not_implemented")
+
+    style = (
+        await db.execute(select(Style).where(Style.id == body.style_id))
+    ).scalar_one_or_none()
+    if style is None:
+        raise HTTPException(404, "style_not_found")
+
+    if body.action_type == "boost":
+        current_min = (
+            await db.execute(
+                select(sqlf.min(Style.display_order)).where(Style.is_active == 1)
+            )
+        ).scalar_one() or 0
+        style.display_order = current_min - 1
+    elif body.action_type == "demote":
+        current_max = (
+            await db.execute(
+                select(sqlf.max(Style.display_order)).where(Style.is_active == 1)
+            )
+        ).scalar_one() or 0
+        style.display_order = current_max + 1
+    elif body.action_type == "offline":
+        style.is_active = 0
+
+    audit = OpsAction(
+        style_id=body.style_id,
+        action_type=body.action_type,
+        reason=body.reason,
+        operator="ai_assistant",
+    )
+    db.add(audit)
+    await db.flush()  # populate audit.id
+    await db.commit()
+
+    return ok(data={
+        "action_id": audit.id,
+        "style_id": body.style_id,
+        "action_type": body.action_type,
+        "display_order": style.display_order,
+        "is_active": bool(style.is_active),
+        "reason": body.reason,
+    })
