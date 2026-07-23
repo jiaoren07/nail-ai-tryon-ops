@@ -452,6 +452,35 @@ class ActionBody(BaseModel):
     reason: str | None = None
 
 
+async def _apply_action_and_audit(
+    db: AsyncSession,
+    style: Style,
+    *,
+    action_type: str,
+    reason: str | None,
+    display_order: int | None = None,
+    is_active: int | None = None,
+) -> OpsAction:
+    """Apply one style mutation and stage its matching audit row.
+
+    The caller owns the commit so multiple field changes can land atomically.
+    """
+    if display_order is not None:
+        style.display_order = display_order
+    if is_active is not None:
+        style.is_active = is_active
+
+    audit = OpsAction(
+        style_id=style.id,
+        action_type=action_type,
+        reason=reason,
+        operator="ai_assistant",
+    )
+    db.add(audit)
+    await db.flush()
+    return audit
+
+
 @router.post("/actions")
 async def perform_action(body: ActionBody, db: AsyncSession = Depends(get_db)):
     """Plan §6.4: unified ops-action entrypoint. Every action (except
@@ -477,31 +506,33 @@ async def perform_action(body: ActionBody, db: AsyncSession = Depends(get_db)):
     if style is None:
         raise HTTPException(404, "style_not_found")
 
+    display_order: int | None = None
+    is_active: int | None = None
     if body.action_type == "boost":
         current_min = (
             await db.execute(
                 select(sqlf.min(Style.display_order)).where(Style.is_active == 1)
             )
         ).scalar_one() or 0
-        style.display_order = current_min - 1
+        display_order = current_min - 1
     elif body.action_type == "demote":
         current_max = (
             await db.execute(
                 select(sqlf.max(Style.display_order)).where(Style.is_active == 1)
             )
         ).scalar_one() or 0
-        style.display_order = current_max + 1
+        display_order = current_max + 1
     elif body.action_type == "offline":
-        style.is_active = 0
+        is_active = 0
 
-    audit = OpsAction(
-        style_id=body.style_id,
+    audit = await _apply_action_and_audit(
+        db,
+        style,
         action_type=body.action_type,
         reason=body.reason,
-        operator="ai_assistant",
+        display_order=display_order,
+        is_active=is_active,
     )
-    db.add(audit)
-    await db.flush()  # populate audit.id
     await db.commit()
 
     return ok(data={
@@ -511,4 +542,99 @@ async def perform_action(body: ActionBody, db: AsyncSession = Depends(get_db)):
         "display_order": style.display_order,
         "is_active": bool(style.is_active),
         "reason": body.reason,
+    })
+
+
+# ===== Step 6.5: GET/PATCH /api/ops/styles =====
+
+class StylePatchBody(BaseModel):
+    is_active: bool | None = None
+    display_order: int | None = None
+    reason: str | None = None
+
+
+def _style_to_ops_dict(style: Style) -> dict:
+    return {
+        "id": style.id,
+        "name": style.name,
+        "gender": style.gender,
+        "cover_url": style.cover_url,
+        "style_tags": json.loads(style.style_tags),
+        "color_main": style.color_main,
+        "color_tone": style.color_tone,
+        "length_pref": style.length_pref,
+        "complexity": style.complexity,
+        "heat_score": style.heat_score,
+        "is_active": bool(style.is_active),
+        "display_order": style.display_order,
+        "created_at": style.created_at.isoformat() if style.created_at else None,
+    }
+
+
+@router.get("/styles")
+async def list_ops_styles(db: AsyncSession = Depends(get_db)):
+    """Return every style, including inactive rows, in display order."""
+    styles = (
+        await db.execute(
+            select(Style).order_by(Style.display_order.asc(), Style.id.asc())
+        )
+    ).scalars().all()
+    return ok(data={
+        "items": [_style_to_ops_dict(style) for style in styles],
+        "total": len(styles),
+    })
+
+
+@router.patch("/styles/{style_id}")
+async def patch_ops_style(
+    style_id: str,
+    body: StylePatchBody,
+    db: AsyncSession = Depends(get_db),
+):
+    """Update active/order fields and atomically append one audit per change."""
+    if body.is_active is None and body.display_order is None:
+        raise HTTPException(400, "no_fields_to_update")
+
+    style = (
+        await db.execute(select(Style).where(Style.id == style_id))
+    ).scalar_one_or_none()
+    if style is None:
+        raise HTTPException(404, "style_not_found")
+
+    audits: list[OpsAction] = []
+    new_is_active = int(body.is_active) if body.is_active is not None else None
+    if new_is_active is not None and style.is_active != new_is_active:
+        audits.append(await _apply_action_and_audit(
+            db,
+            style,
+            action_type="offline",
+            reason=body.reason,
+            is_active=new_is_active,
+        ))
+
+    if body.display_order is not None and style.display_order != body.display_order:
+        audits.append(await _apply_action_and_audit(
+            db,
+            style,
+            action_type="reorder",
+            reason=body.reason,
+            display_order=body.display_order,
+        ))
+
+    if not audits:
+        return ok(data={
+            "changed": False,
+            "style_id": style.id,
+            "is_active": bool(style.is_active),
+            "display_order": style.display_order,
+            "action_ids": [],
+        })
+
+    await db.commit()
+    return ok(data={
+        "changed": True,
+        "style_id": style.id,
+        "is_active": bool(style.is_active),
+        "display_order": style.display_order,
+        "action_ids": [audit.id for audit in audits],
     })

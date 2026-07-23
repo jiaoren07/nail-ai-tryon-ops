@@ -1783,6 +1783,50 @@ benchmark 时发现原 `.env` 写的 model ID 在 PPIO 实际不可用 / 不合�
 
 ---
 
+### ✅ Step 6.5 · 款式管理 CRUD — 2026-07-23
+
+**做了什么：**
+- **`backend/app/routers/ops.py`** 新增 `GET /api/ops/styles`：不套用 C 端的 `is_active=1` 过滤，全量返回 40 款，按 `display_order ASC, id ASC` 稳定排序；响应 `{items, total}`，每项包含 Style 全字段，`style_tags` 解成数组、`is_active` 转为 bool。
+- **`backend/app/routers/ops.py`** 新增 `PATCH /api/ops/styles/{style_id}`：body 支持可选 `is_active`、`display_order`、`reason`，只对实际值变化执行 mutation。
+- `is_active` 的实际变化写一条 `action_type="offline"` audit；`display_order` 的实际变化写一条 `action_type="reorder"` audit；两字段同次改变时各写一条，并在同一次 commit 中原子落库。
+- 无实际值变化返回 `changed=false` 且不写 audit；无更新字段返回 400 `no_fields_to_update`；不存在款式返回 404 `style_not_found`。
+- 从 Step 6.4 抽出同文件私有 helper **`_apply_action_and_audit(...)`**，让 actions 与 styles PATCH 共用“修改 Style + stage OpsAction”逻辑，commit 仍由入口函数掌控。
+- 新增 **`backend/scripts/_check_styles_crud_api.py`**：6-case 真实 HTTP 验证，并在每次有效 PATCH 后直接 SELECT SQLite，避免只信 API 内存响应。
+
+**Step 6.5 验证：**
+
+| 验证项 | 实测 |
+|---|---|
+| seed 基线 | ✅ styles=40 / tryons=12847 / stats=1432 |
+| GET 运营款式列表 | ✅ total=40、items=40，`f_25 is_active=false` 仍在列表 |
+| GET 排序 | ✅ `(display_order, id)` 全列表升序 |
+| PATCH 下架 + C 端即时感知 | ✅ SQL `f_25.is_active=0`；`/api/styles` 返回 39 条且无 f_25 |
+| `offline` audit | ✅ `ops_actions` 直接 SQL 计数 +1 |
+| PATCH 排序 + `reorder` audit | ✅ SQL `f_24.display_order=123`；audit 计数 +1 |
+| 相同排序重复 PATCH | ✅ `changed=false`、DB 状态不变、audit 不增加 |
+| unknown id / empty body | ✅ 404 `style_not_found` / 400 `no_fields_to_update` |
+| Step 6.4 actions 回归 | ✅ 6/6 `ALL PASS`，boost/demote/offline 与错误路径未回归 |
+| 编译与 diff 健康 | ✅ `py_compile`、`git diff --check` 通过 |
+| 用户手动验证 | ✅ 6-case 最终 `ALL PASS`，用户明确回复“ok通过” |
+
+**几个设计选择（透明告知）：**
+1. **GET 返回全字段而不是复用 C 端精简 dict**：Phase 7 O6 表格需要 `gender`、标签、热度、上下架状态、排序值；直接给完整 Style 形状避免前端再为缺字段补详情请求。JSON 字符串在 API 边界解成数组，数据库存储方式不外泄。
+2. **排序加 `id ASC` tie-breaker**：plan 只要求 `display_order ASC`，但运营手动排序可能产生重复值；加稳定次序能避免刷新后同行抖动，不改变业务排序含义。
+3. **幂等判断放在写 audit 之前**：相同值重放是正常的前端重试，不应制造“运营执行过一次动作”的假审计。响应显式给 `changed` 和 `action_ids`，前端可区分真变更与幂等成功。
+4. **一字段一 audit、一次请求一事务**：两字段同时修改时保留两条可解释记录，而不是合成模糊 action；helper 只 `flush` 不 `commit`，由 PATCH 统一 commit，保证两个 mutation + 两条 audit 要么全落、要么全回滚。
+5. **`is_active` 双向变化都按 plan 字面记为 `offline`**：这个 action_type 对“重新上架”语义不完美，但 schema/plan 没有 `online`，本步不扩展枚举或擅改契约；未来若产品区分上下架，应显式新增 `online` 并迁移历史口径。
+6. **只做局部 helper 提取**：没有重排 ops.py 其他聚合代码，也没有新建 `styles.py`；Step 6.4 的 action 校验、501 reorder 语义和响应形状保持不变。
+7. **没有为额外 pytest 回归擅自装依赖**：仓库虚拟环境当前无 `pytest`，`python -m pytest` 明确报 `No module named pytest`；本步用计划指定的真实 API 脚本 + Step 6.4 回归覆盖，避免未经确认新增依赖。
+
+**给后续开发者的提示：**
+- **按当前 `implementation-plan.md`，Phase 6 是 5 步且现已 5/5 完成**；下一步唯一目标是 **Step 7.1 运营端布局与共享导航**。旧 HANDOFF 的“Phase 6 4/7”是接手时快照，不要据此虚构 6.6/6.7。
+- Phase 7 的 O6 页面可直接使用 GET 的 `is_active`、`display_order`、`heat_score` 等字段；开关/上下移按钮 PATCH 后看 `data.changed` 判断是否需要 toast 和本地更新。
+- `_check_styles_crud_api.py` 会故意把 `f_25` 下架、把 `f_24.display_order` 改为 123；重复手测前和演示前先 `seed_all.py`，否则 T1 会因初始状态已变而得到 `changed=false`。
+- 用户第一次手测出现 `WinError 10061` 是验证服务已被停止导致的连接拒绝，不是接口 case 失败；手动运行脚本前必须先保持 uvicorn 在 8000 端口监听。
+- `_apply_action_and_audit(...)` 已可供后续 Step 8 Function Calling 的动作入口复用，但不要绕过现有 `/api/ops/actions` 契约或在 helper 内自行 commit。
+
+---
+
 ### 📌 项目锁定状态 + 公约提醒（无需每步更新，状态真变才改）
 
 > 本段是**稳定的锁定状态指针**，不是 step-by-step 的进度条。
