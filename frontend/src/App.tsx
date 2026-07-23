@@ -1,6 +1,8 @@
 import { App as AntApp } from "antd";
-import { BrowserRouter, Route, Routes } from "react-router-dom";
+import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import Placeholder from "./components/Placeholder";
+import OpsLayout from "./pages/ops/OpsLayout";
+import OpsPlaceholder from "./pages/ops/OpsPlaceholder";
 import L0 from "./pages/user/L0";
 import U0 from "./pages/user/U0";
 import U1 from "./pages/user/U1";
@@ -11,8 +13,8 @@ import U5 from "./pages/user/U5";
 import { UserProvider } from "./store/UserContext";
 
 /**
- * Step 5.1 plumbing: every page is a Placeholder + DebugBar.
- * Step 5.2 onward replaces them one by one (L0 first).
+ * Consumer pages are replaced step-by-step from the original route skeleton.
+ * Step 7.1 nests every /ops page under one shared operator layout.
  *
  * Route table mirrors design-docu.md §11.2 verbatim.
  */
@@ -30,17 +32,89 @@ export default function App() {
             <Route path="/compare" element={<U4 />} />
             <Route path="/result/:id" element={<U5 />} />
             <Route path="/history" element={<Placeholder code="U6" title="试戴历史" />} />
-            <Route path="/ops/overview" element={<Placeholder code="O1" title="运营 · 数据概览" />} />
-            <Route path="/ops/trending" element={<Placeholder code="O2" title="运营 · 爆款看板" />} />
-            <Route path="/ops/cold" element={<Placeholder code="O3" title="运营 · 冷门看板" />} />
-            <Route path="/ops/report" element={<Placeholder code="O4" title="运营 · 报告中心" />} />
-            <Route path="/ops/chat" element={<Placeholder code="O5" title="运营 · AI 助手" />} />
-            <Route path="/ops/styles" element={<Placeholder code="O6" title="运营 · 款式管理" />} />
-            <Route path="/ops/setting" element={<Placeholder code="O7" title="运营 · 设置中心" />} />
-            <Route
-              path="/ops/reports/:id"
-              element={<Placeholder code="RDET" title="运营 · 报告详情" />}
-            />
+            <Route path="/ops" element={<OpsLayout />}>
+              <Route index element={<Navigate to="overview" replace />} />
+              <Route
+                path="overview"
+                element={
+                  <OpsPlaceholder
+                    code="O1"
+                    title="数据概览"
+                    description="汇总今日关键指标、七日趋势、款式分布与时段热力。"
+                  />
+                }
+              />
+              <Route
+                path="trending"
+                element={
+                  <OpsPlaceholder
+                    code="O2"
+                    title="爆款趋势"
+                    description="识别近期高速增长款式，并提供可执行的运营建议。"
+                  />
+                }
+              />
+              <Route
+                path="cold"
+                element={
+                  <OpsPlaceholder
+                    code="O3"
+                    title="冷门预警"
+                    description="发现低试戴、低点击款式，辅助及时优化或下架。"
+                  />
+                }
+              />
+              <Route
+                path="report"
+                element={
+                  <OpsPlaceholder
+                    code="O4"
+                    title="报告中心"
+                    description="查看运营日报、周报及邮件发送状态。"
+                  />
+                }
+              />
+              <Route
+                path="chat"
+                element={
+                  <OpsPlaceholder
+                    code="O5"
+                    title="AI 助手"
+                    description="用自然语言查询运营数据并执行经过确认的运营动作。"
+                  />
+                }
+              />
+              <Route
+                path="styles"
+                element={
+                  <OpsPlaceholder
+                    code="O6"
+                    title="款式管理"
+                    description="管理全部款式的上下架状态与推荐展示顺序。"
+                  />
+                }
+              />
+              <Route
+                path="setting"
+                element={
+                  <OpsPlaceholder
+                    code="O7"
+                    title="设置中心"
+                    description="配置通知、邮件订阅、AI 助手偏好与界面选项。"
+                  />
+                }
+              />
+              <Route
+                path="reports/:id"
+                element={
+                  <OpsPlaceholder
+                    code="RDET"
+                    title="报告详情"
+                    description="查看报告正文、生成时间和邮件投递结果。"
+                  />
+                }
+              />
+            </Route>
             <Route
               path="*"
               element={<Placeholder code="404" title="未匹配路径" hint="检查 App.tsx 路由表" />}

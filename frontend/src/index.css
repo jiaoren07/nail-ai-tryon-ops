@@ -7,9 +7,11 @@
    it via style={{ color: 'var(--ai-purple)' }}. User-side uses Tailwind
    `text-ai-purple` / `bg-ai-purple` directly. */
 :root {
+  --brand-yellow: #ffd100;
   --ai-purple: #7c5cff;
   --ai-blue: #28a8ff;
   --ai-wash: #f4f0ff;
+  --ops-sidebar: #15171c;
 }
 
 html,
@@ -25,4 +27,33 @@ body {
     "Microsoft YaHei", sans-serif;
   background: #faf8f2;
   color: #111111;
+}
+
+.ops-sider {
+  position: relative;
+  min-height: 100vh;
+  background: var(--ops-sidebar) !important;
+}
+
+.ops-menu.ant-menu-dark {
+  background: transparent;
+}
+
+.ops-menu.ant-menu-dark .ant-menu-item {
+  height: 44px;
+  line-height: 44px;
+  margin-block: 6px;
+}
+
+.ops-menu.ant-menu-dark .ant-menu-item-selected {
+  color: #111111;
+  background: var(--brand-yellow);
+}
+
+.ops-menu.ant-menu-dark .ant-menu-item-selected .anticon {
+  color: #111111;
+}
+
+.ops-header {
+  line-height: normal;
 }

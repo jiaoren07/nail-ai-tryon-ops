@@ -1827,6 +1827,48 @@ benchmark 时发现原 `.env` 写的 model ID 在 PPIO 实际不可用 / 不合�
 
 ---
 
+### ✅ Step 7.1 · 运营端布局与共享导航 — 2026-07-23
+
+**做了什么：**
+- 新建 **`frontend/src/pages/ops/OpsLayout.tsx`**：使用 antd `Layout/Sider/Menu/Header/Content` 建立所有 `/ops/*` 页面共享外壳，左侧固定展示数据概览、爆款趋势、冷门预警、AI 助手、款式管理、设置中心 6 项菜单。
+- 菜单 key 直接使用完整路由路径；`useLocation()` 从当前 URL 派生唯一选中项，`useNavigate()` 处理点击跳转，因此直接深链、刷新和点击导航都会得到一致高亮。
+- 顶部栏展示当前页面标题、AI 驱动标签和带静态红点的铃铛按钮；侧栏底部加入“实时数据闭环”状态提示。
+- 新建 **`frontend/src/pages/ops/OpsPlaceholder.tsx`**：为尚未进入对应 Step 的 O1–O7 页面提供嵌套内容占位，不再复用会撑满整屏并带 DebugBar 的用户侧 Placeholder。
+- **`frontend/src/App.tsx`** 将原有 8 个独立运营路由改为 `/ops` 父路由 + `OpsLayout` + 子路由，并增加 `/ops` → `/ops/overview` 的 index redirect；原 `/ops/report` 与 `/ops/reports/:id` 路径继续保留。
+- **`frontend/src/index.css`** 增加运营侧栏、菜单高度、品牌黄选中态和 Header line-height 样式；未新增 npm 依赖。
+
+**Step 7.1 验证：**
+
+| 验证项 | 实测 |
+|---|---|
+| `npm run build` | ✅ TypeScript + Vite 构建通过，3096 modules transformed |
+| 本步文件 ESLint | ✅ `App.tsx`、`OpsLayout.tsx`、`OpsPlaceholder.tsx` 零错误 |
+| `/ops/overview` 实渲染 | ✅ 左侧 6 项全部可见，“数据概览”品牌黄高亮 |
+| `/ops/trending` 实渲染 | ✅ 页面标题变为“爆款趋势”，高亮同步移到第二项 |
+| 顶部通知入口 | ✅ 铃铛图标 + 静态红点可见 |
+| 路由可达性 | ✅ Vite 对 `/ops/overview` 返回 200；Chrome headless 成功渲染 overview/trending |
+| diff 健康 | ✅ `git diff --check` 通过 |
+| 用户手动验证 | ✅ 用户明确回复“ok” |
+
+**几个设计选择（透明告知）：**
+1. **用 React Router 嵌套路由而不是每页复制 Layout**：侧栏与 Header 只挂载一次，后续 7.2–7.5 只替换 `<Outlet />` 内的业务页，避免菜单状态和视觉结构在多个文件漂移。
+2. **高亮完全由 URL 派生，不维护额外 React state**：本地 state 在浏览器回退、深链或刷新时容易失真；`pathname` 是单一事实源，点击后导航自然触发重算。
+3. **菜单 key 就是目标路径**：不再维护“menu id → route”的第二张映射表，`onClick` 可直接 `navigate(key)`；页面标题表只负责展示文案，不参与路由逻辑。
+4. **保留报告相关路由但不放进 6 项菜单**：design-docu 已取消独立报告中心菜单入口，但旧 `/ops/report` 和报告详情仍可能被通知/设置页引用；保留可达性比删除路径更安全。
+5. **本步只做壳与占位，不提前实现 O1 数据请求或图表**：真实 KPI、ECharts 和轮询属于 Step 7.2；提前混入会破坏一步一验收和单步 commit 边界。
+6. **桌面端固定 232px Sider，不加折叠状态**：design-docu §11.3 规定运营端在桌面启用完整看板，Step 7.1 也未要求移动端折叠；先保持最少状态，后续确有小屏运营需求再加。
+7. **不顺手修全仓旧 lint**：`npm run lint` 的 4 errors / 2 warnings 来自 Step 5 的 U4、U5、UserContext；本步改动文件单独 lint 全绿，遵守 surgical changes，不把无关修复混进 Step 7.1。
+
+**给后续开发者的提示：**
+- **下一步 Step 7.2 只需新建真实 O1 页面并替换 `overview` 子路由 element**；`OpsLayout`、菜单与 Header 不需要重写。
+- Step 7.2 的后端数据已由 `GET /api/ops/overview` 提供；按 plan 每 10 秒刷新一次，组件卸载时务必清理 interval，避免切换菜单后继续后台轮询。
+- `echarts` 与 `echarts-for-react` 已在 package.json，不需要再次安装；四张 Statistic、7 日折线、标签饼图、24 小时热力条可直接使用现有依赖。
+- `/api/ops/overview` 的 `new_trending_alerts` 当前是 0 占位，`active_styles.diff_percent` 可能为 null；前端不要为 null 强行画涨跌箭头。
+- Vite build 有现存的 828kB chunk size warning；Step 7.1 不引入路由懒加载。等页面和图表齐全后再统一评估 code splitting，不要在单个页面 Step 中提前做构建架构重构。
+- 顶部铃铛现在按 Step 7.1 要求是静态红点；真实 unread-count 轮询属于后续通知 Step，接入时只替换 Badge 数据源。
+
+---
+
 ### 📌 项目锁定状态 + 公约提醒（无需每步更新，状态真变才改）
 
 > 本段是**稳定的锁定状态指针**，不是 step-by-step 的进度条。
