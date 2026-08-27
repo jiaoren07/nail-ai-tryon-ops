@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom";
-import { useUser } from "../../store/UserContext";
+import { useUser } from "../../store/useUser";
 
 /**
  * L0 双端入口（design-docu §6.0, 原型 Board 0）.

@@ -2,7 +2,7 @@ import { App as AntApp, Checkbox, Spin } from "antd";
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import api from "../../api/client";
-import { useUser } from "../../store/UserContext";
+import { useUser } from "../../store/useUser";
 
 /**
  * U2 智能推荐页（design-docu §6.3, plan §5.5, 原型 Board 1 第 3 屏）.

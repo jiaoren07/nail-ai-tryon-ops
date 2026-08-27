@@ -4,7 +4,7 @@ import imageCompression from "browser-image-compression";
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import api from "../../api/client";
-import { useUser } from "../../store/UserContext";
+import { useUser } from "../../store/useUser";
 
 /**
  * U1 手图上传页（design-docu §6.2, plan §5.4, 原型 Board 1 第 2 屏）.

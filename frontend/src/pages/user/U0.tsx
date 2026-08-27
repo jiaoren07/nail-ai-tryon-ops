@@ -1,5 +1,6 @@
 import { Link, useNavigate } from "react-router-dom";
-import { useUser, type Gender } from "../../store/UserContext";
+import { type Gender } from "../../store/UserContext";
+import { useUser } from "../../store/useUser";
 
 /**
  * U0 性别选择页（design-docu §6.1, plan §5.3, 原型 Board 1 第 1 屏）.

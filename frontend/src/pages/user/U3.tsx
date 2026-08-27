@@ -2,7 +2,7 @@ import { App as AntApp, Segmented, Spin } from "antd";
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import api from "../../api/client";
-import { useUser } from "../../store/UserContext";
+import { useUser } from "../../store/useUser";
 
 /**
  * U3 款式浏览页（design-docu §6.4, plan §5.6, 原型 Board 2 第 1 屏）.

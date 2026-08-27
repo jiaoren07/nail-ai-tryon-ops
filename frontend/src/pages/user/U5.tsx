@@ -1,9 +1,10 @@
 import { App as AntApp, Spin } from "antd";
+import { isAxiosError } from "axios";
 import { useEffect, useState } from "react";
 import ReactCompareImage from "react-compare-image";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import api from "../../api/client";
-import { useUser } from "../../store/UserContext";
+import { useUser } from "../../store/useUser";
 
 /**
  * U5 单款试戴结果页（design-docu §6.6, plan §5.8, 原型 Board 3 第 1 屏）.
@@ -65,10 +66,14 @@ export default function U5() {
       setLoading(true);
       setError(null);
 
-      // 1) Nav state (from U2/U3 single-tryon flow)
-      const navState = location.state as
-        | { result_url?: string; style?: any; original_url?: string }
-        | null;
+      // 1) Nav state (from U2/U3 single-tryon flow). U4 may pass a partial
+      // style stub (missing color_tone/length_pref), so type it as Partial
+      // and cast at the assignment — render code already tolerates gaps.
+      const navState = location.state as {
+        result_url?: string;
+        style?: Partial<TryonDetail["style"]> & { style_id?: string };
+        original_url?: string;
+      } | null;
 
       const idNum = Number(pathId);
       const looksLikeId = !Number.isNaN(idNum) && Number.isInteger(idNum);
@@ -83,7 +88,7 @@ export default function U5() {
           original_url: navState.original_url ?? null,
           is_collected: false,
           from_module: "recommend",
-          style: navState.style,
+          style: navState.style as TryonDetail["style"],
         };
         if (!cancelled) {
           setDetail(d);
@@ -111,9 +116,11 @@ export default function U5() {
         } else {
           setError(r.data?.msg ?? "load_failed");
         }
-      } catch (e: any) {
+      } catch (e) {
         if (cancelled) return;
-        setError(e?.response?.data?.msg ?? "load_failed");
+        setError(
+          (isAxiosError<{ msg?: string }>(e) && e.response?.data?.msg) || "load_failed",
+        );
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -139,8 +146,10 @@ export default function U5() {
       } else {
         message.error("收藏失败：" + (r.data?.msg ?? "未知错误"));
       }
-    } catch (e: any) {
-      message.error("收藏失败：" + (e?.response?.data?.msg ?? "网络错误"));
+    } catch (e) {
+      const msg =
+        (isAxiosError<{ msg?: string }>(e) && e.response?.data?.msg) || "网络错误";
+      message.error("收藏失败：" + msg);
     } finally {
       setCollecting(false);
     }

@@ -1,36 +1,11 @@
-import {
-  createContext,
-  useCallback,
-  useContext,
-  useMemo,
-  useState,
-  type ReactNode,
-} from "react";
+import { useCallback, useMemo, useState, type ReactNode } from "react";
+import { UserContext, type Gender, type UserContextValue } from "./context";
 
-export type Gender = "female" | "male";
-
-export interface HandFeatures {
-  skin_tone?: string;
-  hand_shape?: string;
-}
-
-export interface UserState {
-  userId: string;
-  userGender: Gender | null;
-  handFeatures: HandFeatures | null;
-  compareSelection: string[];
-  photoId: string | null;
-}
-
-export interface UserContextValue extends UserState {
-  setUserGender: (g: Gender) => void;
-  setHandFeatures: (h: HandFeatures | null) => void;
-  setCompareSelection: (ids: string[]) => void;
-  setPhotoId: (id: string | null) => void;
-  resetEverything: () => void;
-}
-
-const UserContext = createContext<UserContextValue | null>(null);
+// Only the Provider component lives here so Vite fast refresh works
+// (react-refresh/only-export-components). Types + context instance are in
+// ./context, the consumer hook is in ./useUser. Type re-exports below keep
+// existing `import type {...} from "./UserContext"` sites compiling.
+export type { Gender, HandFeatures, UserContextValue, UserState } from "./context";
 
 const SS_USER_ID = "userId";
 const SS_GENDER = "userGender";
@@ -51,7 +26,7 @@ function readGender(): Gender | null {
 export function UserProvider({ children }: { children: ReactNode }) {
   const [userId] = useState<string>(() => ensureUserId());
   const [userGender, setUserGenderState] = useState<Gender | null>(() => readGender());
-  const [handFeatures, setHandFeatures] = useState<HandFeatures | null>(null);
+  const [handFeatures, setHandFeatures] = useState<UserContextValue["handFeatures"]>(null);
   const [compareSelection, setCompareSelection] = useState<string[]>([]);
   const [photoId, setPhotoId] = useState<string | null>(null);
 
@@ -83,10 +58,4 @@ export function UserProvider({ children }: { children: ReactNode }) {
   );
 
   return <UserContext.Provider value={value}>{children}</UserContext.Provider>;
-}
-
-export function useUser(): UserContextValue {
-  const ctx = useContext(UserContext);
-  if (!ctx) throw new Error("useUser must be called inside <UserProvider>");
-  return ctx;
 }

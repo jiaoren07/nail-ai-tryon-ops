@@ -2,7 +2,7 @@ import { App as AntApp, Spin } from "antd";
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import api from "../../api/client";
-import { useUser } from "../../store/UserContext";
+import { useUser } from "../../store/useUser";
 
 /**
  * U4 多款对比试戴页（design-docu §6.5, plan §5.7, 原型 Board 2 第 2 屏）.

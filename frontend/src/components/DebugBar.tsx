@@ -1,5 +1,5 @@
 import { Button, Space, message } from "antd";
-import { useUser } from "../store/UserContext";
+import { useUser } from "../store/useUser";
 import api from "../api/client";
 
 export default function DebugBar() {
