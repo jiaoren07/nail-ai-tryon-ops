@@ -1,6 +1,7 @@
 import { App as AntApp } from "antd";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import Placeholder from "./components/Placeholder";
+import O1Overview from "./pages/ops/O1Overview";
 import OpsLayout from "./pages/ops/OpsLayout";
 import OpsPlaceholder from "./pages/ops/OpsPlaceholder";
 import L0 from "./pages/user/L0";
@@ -36,13 +37,7 @@ export default function App() {
               <Route index element={<Navigate to="overview" replace />} />
               <Route
                 path="overview"
-                element={
-                  <OpsPlaceholder
-                    code="O1"
-                    title="数据概览"
-                    description="汇总今日关键指标、七日趋势、款式分布与时段热力。"
-                  />
-                }
+                element={<O1Overview />}
               />
               <Route
                 path="trending"
