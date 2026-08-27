@@ -452,6 +452,29 @@ class ActionBody(BaseModel):
     reason: str | None = None
 
 
+async def _target_order_for_action(db: AsyncSession, action_type: str) -> int | None:
+    """boost -> min(active display_order)-1; demote -> max+1; else None.
+
+    Shared by the REST action endpoint and the Step 8.1 assistant tool so
+    the "top/bottom of the active list" semantics can never drift apart.
+    """
+    if action_type == "boost":
+        current_min = (
+            await db.execute(
+                select(sqlf.min(Style.display_order)).where(Style.is_active == 1)
+            )
+        ).scalar_one() or 0
+        return current_min - 1
+    if action_type == "demote":
+        current_max = (
+            await db.execute(
+                select(sqlf.max(Style.display_order)).where(Style.is_active == 1)
+            )
+        ).scalar_one() or 0
+        return current_max + 1
+    return None
+
+
 async def _apply_action_and_audit(
     db: AsyncSession,
     style: Style,
@@ -506,24 +529,8 @@ async def perform_action(body: ActionBody, db: AsyncSession = Depends(get_db)):
     if style is None:
         raise HTTPException(404, "style_not_found")
 
-    display_order: int | None = None
-    is_active: int | None = None
-    if body.action_type == "boost":
-        current_min = (
-            await db.execute(
-                select(sqlf.min(Style.display_order)).where(Style.is_active == 1)
-            )
-        ).scalar_one() or 0
-        display_order = current_min - 1
-    elif body.action_type == "demote":
-        current_max = (
-            await db.execute(
-                select(sqlf.max(Style.display_order)).where(Style.is_active == 1)
-            )
-        ).scalar_one() or 0
-        display_order = current_max + 1
-    elif body.action_type == "offline":
-        is_active = 0
+    display_order: int | None = await _target_order_for_action(db, body.action_type)
+    is_active: int | None = 0 if body.action_type == "offline" else None
 
     audit = await _apply_action_and_audit(
         db,
