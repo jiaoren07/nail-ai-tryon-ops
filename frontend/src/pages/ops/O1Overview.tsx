@@ -187,12 +187,15 @@ export default function O1Overview() {
 
   const distributionOption = useMemo<EChartsOption>(
     () => ({
+      // NOTE: not colorInfo — antd defaults colorInfo === colorPrimary, which
+      // made slice 1 and slice 5 the same blue. token.purple keeps us on
+      // preset tokens (no hard-coded hex per tailwind.config.js rule).
       color: [
         token.colorPrimary,
         token.colorSuccess,
         token.colorWarning,
         token.colorError,
-        token.colorInfo,
+        token.purple,
         token.colorTextSecondary,
       ],
       tooltip: { trigger: "item", formatter: "{b}: {c}%" },
@@ -205,7 +208,7 @@ export default function O1Overview() {
         {
           name: "标签占比",
           type: "pie",
-          radius: ["42%", "68%"],
+          radius: ["38%", "62%"],
           center: ["50%", "42%"],
           avoidLabelOverlap: true,
           itemStyle: {
@@ -213,7 +216,14 @@ export default function O1Overview() {
             borderWidth: 3,
             borderRadius: 6,
           },
-          label: { formatter: "{b}\n{d}%" },
+          // 单行短标签（百分比取整）+ 收短引导线，避免左右边缘被画布裁剪；
+          // 精确到 0.1% 的值保留在 tooltip 里
+          label: {
+            formatter: (params: { name: string; percent?: number }) =>
+              `${params.name} ${Math.round(params.percent ?? 0)}%`,
+            fontSize: 11,
+          },
+          labelLine: { length: 12, length2: 8 },
           data:
             overview?.style_distribution.map((item) => ({
               name: item.style_tag,

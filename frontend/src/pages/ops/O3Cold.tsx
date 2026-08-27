@@ -195,7 +195,7 @@ export default function O3Cold() {
       {
         title: "款式",
         key: "style",
-        width: 230,
+        width: 190,
         render: (_, item) => (
           <div className="flex items-center gap-3 min-w-0">
             <img
@@ -211,10 +211,10 @@ export default function O3Cold() {
         ),
       },
       {
-        title: "近 7 天试戴",
+        title: "近 7 天",
         dataIndex: "recent_7d_tryons",
         key: "recent7d",
-        width: 110,
+        width: 84,
         render: (value: number) => (
           <span className={value <= 2 ? "font-semibold text-danger" : "text-ink"}>{value}</span>
         ),
@@ -222,19 +222,19 @@ export default function O3Cold() {
       {
         title: "点击曝光比",
         key: "ratio",
-        width: 110,
+        width: 96,
         render: (_, item) => `${(item.exposure_click_ratio * 100).toFixed(1)}%`,
       },
       {
         title: "上架天数",
         dataIndex: "days_since_listed",
         key: "days",
-        width: 96,
+        width: 80,
       },
       {
         title: "冷门原因",
         key: "reason",
-        width: 220,
+        width: 170,
         render: (_, item) => (
           <Tag color="orange" bordered={false} className="whitespace-normal leading-5">
             {item.cold_reason}
@@ -245,12 +245,13 @@ export default function O3Cold() {
         title: "建议",
         dataIndex: "suggestion",
         key: "suggestion",
+        width: 200,
         className: "text-ink-secondary",
       },
       {
         title: "操作",
         key: "action",
-        width: 230,
+        width: 186,
         render: (_, item) => renderActions(item, "small"),
       },
     ],
@@ -298,6 +299,7 @@ export default function O3Cold() {
           dataSource={items}
           loading={loading}
           pagination={false}
+          scroll={{ x: 1006 }}
           locale={{
             emptyText: <Empty description="当前没有命中冷门规则的在架款式" />,
           }}
