@@ -3,6 +3,7 @@ import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import Placeholder from "./components/Placeholder";
 import O1Overview from "./pages/ops/O1Overview";
 import O2Trending from "./pages/ops/O2Trending";
+import O3Cold from "./pages/ops/O3Cold";
 import OpsLayout from "./pages/ops/OpsLayout";
 import OpsPlaceholder from "./pages/ops/OpsPlaceholder";
 import L0 from "./pages/user/L0";
@@ -41,16 +42,7 @@ export default function App() {
                 element={<O1Overview />}
               />
               <Route path="trending" element={<O2Trending />} />
-              <Route
-                path="cold"
-                element={
-                  <OpsPlaceholder
-                    code="O3"
-                    title="冷门预警"
-                    description="发现低试戴、低点击款式，辅助及时优化或下架。"
-                  />
-                }
-              />
+              <Route path="cold" element={<O3Cold />} />
               <Route
                 path="report"
                 element={
