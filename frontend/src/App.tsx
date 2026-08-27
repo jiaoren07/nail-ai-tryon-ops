@@ -4,6 +4,7 @@ import Placeholder from "./components/Placeholder";
 import O1Overview from "./pages/ops/O1Overview";
 import O2Trending from "./pages/ops/O2Trending";
 import O3Cold from "./pages/ops/O3Cold";
+import O6Styles from "./pages/ops/O6Styles";
 import OpsLayout from "./pages/ops/OpsLayout";
 import OpsPlaceholder from "./pages/ops/OpsPlaceholder";
 import L0 from "./pages/user/L0";
@@ -63,16 +64,7 @@ export default function App() {
                   />
                 }
               />
-              <Route
-                path="styles"
-                element={
-                  <OpsPlaceholder
-                    code="O6"
-                    title="款式管理"
-                    description="管理全部款式的上下架状态与推荐展示顺序。"
-                  />
-                }
-              />
+              <Route path="styles" element={<O6Styles />} />
               <Route
                 path="setting"
                 element={
