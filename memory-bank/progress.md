@@ -1869,6 +1869,52 @@ benchmark 时发现原 `.env` 写的 model ID 在 PPIO 实际不可用 / 不合�
 
 ---
 
+### ✅ Batch A · Step 7.2–7.5 运营端四页 + lint 清零 — 2026-08-27
+
+> **本批起进入批式开发模式**（经用户 2026-08-27 确认）：低风险、模式已定型的步骤按批连做，
+> commit 仍一步一个，人工验收移到批末一次进行；HANDOFF §7 停止条件（破坏性操作/动 secret/加依赖/偏离 plan）不变。
+
+**做了什么（5 个 commit）：**
+- **Step 7.2 `b8baf93`** O1Overview：4 KPI 卡（涨绿跌红、diff=null 灰色横杠）+ 7 日折线 + 标签饼图 + 24h 热力，10s 轮询 `/api/ops/overview`，卸载清 interval。接手自上一会话的未提交半成品，验证后收编。
+- **Step 7.3 `6e85733`** O2Trending：表格（sparkline/增长率/收藏率/24h/发现时间）+ 行点击 Drawer（大图+趋势图+建议）+「采纳建议」→ `POST /api/ops/actions {boost}`。growth_rate=null 渲染「首次爆发」Tag。抽出共享 `components/EChart.tsx` 与 `utils/url.ts`。
+- **Step 7.4 `d5acd15`** O3Cold：表格 + Drawer；按钮按建议映射真实动作（含「下架」→offline 主按钮 + Popconfirm；否则 demote 主按钮），「优化主图」无后端 action 不做假按钮。下架成功本地移除行。
+- **Step 7.5 `f5120d3`** O6Styles：全量 40 款表（含 inactive 弱化行）+ 上下架 Switch（PATCH is_active）+ 上移/下移（相邻交换 display_order，两次 PATCH 各写 reorder audit；相等值退化 ±1；失败 refetch）。
+- **chore `7133c5d`** lint 清零：U5 3×any → isAxiosError 类型守卫；UserContext 拆 context.ts/useUser.ts/Provider-only（react-refresh 规则），8 个消费文件 import 更新。全仓 0 error（剩 U4 2 条 exhaustive-deps warning，修复会改变对比页 effect 重跑行为，故意保留）。
+
+**Batch A 验证（全部实测通过）：**
+
+| 验证项 | 实测 |
+|---|---|
+| 7.2 图表渲染 | ✅ 4 KPI + 3 图卡 5 canvas，无错误 Alert |
+| 7.2 数据闭环 | ✅ API 真实试戴 → 页面不刷新 10s 内 KPI 538→539，环比同步 52.0→52.3 |
+| 7.2 箭头一致性 | ✅ 正值绿↑，diff=null 灰− 不硬画 |
+| 7.3 表格 ≥2 行 | ✅ 3 行（f_15/m_15/f_09），+216% 与 API 2.16 一致，封面全载 |
+| 7.3 Drawer + 采纳 | ✅ 浏览器点采纳 → f_15 order 14→-1（min-1），audit(boost+reason) 落库，按钮变已采纳 |
+| 7.4 冷门 ≥3 | ✅ 16 行 |
+| 7.4 下架闭环 | ✅ m_13 下架 → O3 行移除、C 端 male pool 15→14、SQL is_active=0、offline audit |
+| 7.4 降序 | ✅ f_11 → order 40（max+1），demote audit，按钮变已降序 |
+| 7.5 全量列表 | ✅ 40 行含 is_active=0 的 m_13（弱化+开关 off），(display_order,id) 升序 |
+| 7.5 开关双向 | ✅ m_13 重新上架 → DB=1、C 端 male 15 款含 m_13、统计「在架 40」 |
+| 7.5 上移交换 | ✅ f_01↔f_15 交换（-1/0），页面行互换，audit 2 条 reorder |
+| 跨页闭环 | ✅ O2 采纳的 f_15 在 O6 居首；O6 上移的 f_01 在用户端 /browse 列表首位 |
+| 质量门 | ✅ 每步 eslint 0 error + tsc -b；批末全仓 lint 0 error + build 通过 + U 端回归（/browse 25 图全载） |
+
+**几个设计选择（透明告知）：**
+1. O2「采纳建议」统一映射 boost：后端 4 种建议文案全部是"提升曝光"语义，boost（min-1 置顶）是唯一真实可执行对应；reason 带上建议原文保证审计可解释。
+2. O3 不做假按钮：「优化主图」没有后端 action，按钮组只给 demote/offline 真动作，优化主图保留在建议文案里。宁缺毋假。
+3. O6 上移/下移用相邻交换而非全局重排：两次 PATCH 非原子，第二次失败即 refetch 恢复；产生 2 条 reorder audit 是真实语义（两款各变了一次序）。
+4. 新版 react-hooks 规则 `set-state-in-effect` 连间接调用都追踪：fetch 必须定义在 effect 内部（O1 模式），刷新按钮经 reloadToken 触发。O2/O3/O6 统一此模式。
+5. seed 后 styles.created_at=seed 时刻 → cold 页「上架天数」全为 0、rule3（上架>30 天）不可能触发。这是 seed 数据特性不是 bug；演示口径以 rule1（近 7 天量少）为主。
+
+**给后续开发者的提示：**
+- 下一步 **Step 8.1**（Function Calling 工具集）。按批式模式约定：8.1 完成后停一下确认 schema 设计，再连做 8.2–8.3。
+- `_apply_action_and_audit` helper（ops.py）等着 Step 8 的动作类工具复用，不要绕过 `/api/ops/actions` 契约。
+- O 页面若要新增图表一律 import `components/EChart`；封面路径一律 `utils/url.ts absUrl`（用户端 U2-U5 还留着四份本地拷贝，属已验证代码未动，后续想统一时机械替换即可）。
+- 本批浏览器验证在数据库留下 audit id 16–23 共 8 条真实动作记录（含一次测试误触 f_01 开关的 offline/上架对），demo 前想要干净审计流水就 reseed。
+- build 主 chunk 已 2.36MB（echarts 全量引入）。Phase 7 完成，按 7.1 的约定现在是评估 code splitting 的合法时机，但属于优化项不阻塞 Phase 8。
+
+---
+
 ### 📌 项目锁定状态 + 公约提醒（无需每步更新，状态真变才改）
 
 > 本段是**稳定的锁定状态指针**，不是 step-by-step 的进度条。

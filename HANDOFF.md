@@ -12,12 +12,12 @@ that the previous session accumulated but never made explicit in the repo.
 
 Then before writing any code, **summarize the 5 workflow rules + current state + Step goal** back to the user for confirmation.
 
-## 1. Current build state (as of 2026-06-28)
+## 1. Current build state (as of 2026-08-27)
 
-- **Phase 0-5 done** — repo scaffolding, DB seed, backend C-side APIs, LLM + image-gen services, full frontend user flow (L0 → U0 gender → U1 upload → U2 recommend → U3 browse → U4 compare → U5 result).
-- **Phase 6 backend: 4/7 done** — 6.1 overview / 6.2 trending / 6.3 cold / 6.4 actions.
-- **Next: Step 6.5** — `GET /api/ops/styles` (return all 40 including inactive) + `PATCH /api/ops/styles/{id}` (mutate is_active / display_order + audit-write to ops_actions).
-- `git log --oneline -15` shows the last 15 commits with `feat(backend|frontend): Step X.Y ...` naming.
+- **Phase 0-7 done** — scaffolding, DB seed, backend C-side + B-side APIs (Phase 6 was 5 steps, all done), AI service layer, full user flow (L0 → U0 → U1 → U2 → U3 → U4 → U5), full ops frontend (7.1 layout / 7.2 O1 overview / 7.3 O2 trending / 7.4 O3 cold / 7.5 O6 styles).
+- **Frontend lint is at 0 errors** (only 2 intentional U4 exhaustive-deps warnings remain — fixing them changes effect re-run behavior, leave them).
+- **Next: Step 8.1** — Function Calling tool-set definition (`backend/app/services/assistant_tools.py`, 5 tools per design-docu §5.3).
+- `git log --oneline -15` shows the last commits with `feat(backend|frontend): Step X.Y ...` naming. Detailed batch record: progress.md "Batch A" entry.
 
 ## 2. Workflow — five hard rules
 
@@ -25,7 +25,7 @@ These override any general "auto-continue" behavior your default settings might 
 
 1. **Follow `implementation-plan.md` step IDs strictly.** Don't skip. Don't merge steps into one commit. Each step's `**验证**` block is the definition of done.
 
-2. **Human-in-the-loop gate after every step.** Sequence: implement → run auto verification → **present result to user** → **wait for user's explicit OK** (`ok` / `通过` / `下一步` / affirmative Chinese) → write `progress.md` entry → git commit → next step. **Never auto-commit even when auto-tests pass.** The user visually inspects UI / images / real behavior that auto tests can't cover. Pure cleanup with zero product impact (deleting test residue, renaming) can be chained, but still show the diff first.
+2. **Human-in-the-loop gate — batch mode since 2026-08-27 (user-approved).** Low-risk steps with established patterns run as batches: implement + auto-verify + commit per step WITHOUT waiting, then **one user review gate at batch end** (user visually inspects all pages/behavior at once). progress.md gets one batch entry. Steps with concentrated risk still gate individually: Step 8.1 tool schemas (pause before 8.2), anything touching real SMTP sends, and any visual/AI-quality judgment. HANDOFF §7 stop conditions (destructive ops / secrets / new deps / plan deviation) always apply regardless of mode. If the user revokes batch mode, revert to per-step waiting.
 
 3. **Every step report ends with a `手动验证方法` section.** Give the user a copy-pasteable command + describe what "通过" looks like. Don't wait to be asked. From Step 5 onward, one primary path (auto script → "ALL PASS") is enough; only add secondary paths if they have demo value or the primary is fragile.
 
@@ -86,27 +86,21 @@ Every completed Step needs:
 
 3. **Update `📌 项目锁定状态` section only when a locked decision actually changes** (rare — mostly for secret rotation events or model swaps).
 
-## 6. Next step: Step 6.5 — style management CRUD
+## 6. Next step: Step 8.1 — Function Calling tool-set (Phase 8 opener)
 
-**Plan reference:** `implementation-plan.md` §6.5. Note plan literal says "return 25 styles" — that's outdated (predates male styles addition). Real count is 40. Assert against 40.
+**Plan reference:** `implementation-plan.md` §8.1. Batch-mode note: 8.1 gates individually (pause and confirm tool schemas with the user before starting 8.2/8.3) because LLM function-calling behavior against PPIO is the riskiest remaining area.
 
 **Deliverables:**
-- `GET /api/ops/styles` — full list including `is_active=0`, ordered by `display_order asc`. Response shape: `{items: [full-style-dict], total}`. Different from C-side `/api/styles` (which filters `is_active=1`).
-- `PATCH /api/ops/styles/{style_id}` — Pydantic body `{is_active?: bool, display_order?: int, reason?: str}`. Each changed field triggers an audit row in `ops_actions` (plan literal: `is_active` change → action_type `offline`; `display_order` change → `reorder`). If no field to update → 400. If no actual value change → return `changed: false` (idempotent, no audit row).
-- Both live in `backend/app/routers/ops.py` (§2.3 single-file convention — do NOT create `styles.py`).
-- Consider extracting a shared `_apply_action_and_audit(...)` helper with Step 6.4 (Step 6.4 progress "forward notes" already predicted this refactor opportunity).
+- `backend/app/services/assistant_tools.py` — 5 tools in OpenAI tools JSON-Schema format per plan §8.1 literal: `query_top_styles(date_range, top_n, gender?)`, `compare_styles(style_ids[], date_range)`, `find_trending(growth_threshold, min_volume)`, `find_cold(days_no_activity)`, `execute_action(style_id, action_type)`.
+- Pure functions returning dicts (NOT HTTP responses) + a name→function dispatcher.
+- `execute_action` MUST route through the same mutation+audit path as `/api/ops/actions` — reuse `_apply_action_and_audit(...)` in `ops.py`, do not bypass the audit contract.
 
-**Verification script pattern:** `backend/scripts/_check_styles_crud_api.py`, mirror `_check_actions_api.py` — direct SQL SELECT after each PATCH to prove writes landed, not just trust the response body.
+**Environment facts that matter for Phase 8:**
+- LLM strong tier = `deepseek/deepseek-v4-pro` (supports FC), quick tier = `qwen/qwen3-next-80b-a3b-instruct`, both via PPIO. `TIMEOUT_SECONDS=60`.
+- PPIO quick tier is rate-limited to 5 req/min on this key — chat loops must be single-call per user turn, no parallel tool-result summarization fan-out.
+- Ops endpoints have no auth (demo scope); the assistant executes actions as `operator="ai_assistant"` which is already the audit default.
 
-**Verify checklist:**
-1. `GET /api/ops/styles` returns 40 rows (include a row where `is_active=0` from a previous demo run to prove it's not filtering).
-2. `PATCH /api/ops/styles/f_XX` setting `is_active=false` → subsequent `GET /api/styles` (C-side) drops that row.
-3. `PATCH` with new `display_order` → `ops_actions` gets a `reorder` row.
-4. Same PATCH re-fired with unchanged value → `changed: false`, no new audit row.
-5. `PATCH` on unknown id → 404 `style_not_found`.
-6. `PATCH` with empty body → 400 `no_fields_to_update`.
-
-**Handoff-specific reminder:** Step 5.8 already added `result_url` + `photo_id` columns to `tryons` via `scripts/_migrate_add_tryon_url_columns.py`. Style model itself has NOT changed since Step 1.1; if you find yourself wanting to `ALTER TABLE styles`, stop and check whether the plan actually requires it.
+**Verify pattern:** `backend/scripts/_check_assistant_tools.py` — direct function-call harness first (no LLM), then one real FC round-trip against PPIO strong model.
 
 ## 7. If you're not sure — ask, don't guess
 
