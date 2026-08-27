@@ -8,10 +8,10 @@ import {
   ThunderboltOutlined,
 } from "@ant-design/icons";
 import { Alert, Card, Col, Row, Segmented, Skeleton, Statistic, theme } from "antd";
-import * as echarts from "echarts";
 import type { EChartsOption } from "echarts";
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import api from "../../api/client";
+import EChart from "../../components/EChart";
 
 interface KpiValue {
   value: number;
@@ -43,30 +43,6 @@ interface KpiCardProps {
   icon: ReactNode;
   precision?: number;
   suffix?: string;
-}
-
-function EChart({ option, height }: { option: EChartsOption; height: number }) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const chartRef = useRef<echarts.ECharts | null>(null);
-
-  useEffect(() => {
-    if (!containerRef.current) return;
-    const chart = echarts.init(containerRef.current);
-    chartRef.current = chart;
-    const resizeObserver = new ResizeObserver(() => chart.resize());
-    resizeObserver.observe(containerRef.current);
-    return () => {
-      resizeObserver.disconnect();
-      chart.dispose();
-      chartRef.current = null;
-    };
-  }, []);
-
-  useEffect(() => {
-    chartRef.current?.setOption(option, { notMerge: true });
-  }, [option]);
-
-  return <div ref={containerRef} style={{ height }} />;
 }
 
 function KpiCard({

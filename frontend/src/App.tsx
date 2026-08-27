@@ -2,6 +2,7 @@ import { App as AntApp } from "antd";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import Placeholder from "./components/Placeholder";
 import O1Overview from "./pages/ops/O1Overview";
+import O2Trending from "./pages/ops/O2Trending";
 import OpsLayout from "./pages/ops/OpsLayout";
 import OpsPlaceholder from "./pages/ops/OpsPlaceholder";
 import L0 from "./pages/user/L0";
@@ -39,16 +40,7 @@ export default function App() {
                 path="overview"
                 element={<O1Overview />}
               />
-              <Route
-                path="trending"
-                element={
-                  <OpsPlaceholder
-                    code="O2"
-                    title="爆款趋势"
-                    description="识别近期高速增长款式，并提供可执行的运营建议。"
-                  />
-                }
-              />
+              <Route path="trending" element={<O2Trending />} />
               <Route
                 path="cold"
                 element={
