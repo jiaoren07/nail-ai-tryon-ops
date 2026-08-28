@@ -1,8 +1,11 @@
 """FastAPI application entrypoint."""
+import logging
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.cron import CronTrigger
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -18,15 +21,57 @@ from app.responses import (
 )
 from app.routers import ops as ops_router
 from app.routers import user as user_router
+from app.services.report import generate_and_dispatch_report
 
 BACKEND_ROOT = Path(__file__).resolve().parent.parent
 STATIC_DIR = BACKEND_ROOT / "static"
+
+_log = logging.getLogger("nail_demo.main")
+
+# Step 9.2: in-process scheduler (design-docu §7.7.2). Module-level so the
+# debug/introspection code can reach it; started only when
+# SCHEDULER_ENABLED and always shut down on app exit.
+# timezone is EXPLICIT on every trigger — a UTC host would otherwise fire
+# "09:00" eight hours late (plan §9.2 hard requirement).
+scheduler = AsyncIOScheduler(timezone="Asia/Shanghai")
+
+_MISFIRE_GRACE_SECONDS = 3600
+
+
+async def _run_daily_report() -> None:
+    await generate_and_dispatch_report("daily", "scheduled")
+
+
+async def _run_weekly_report() -> None:
+    await generate_and_dispatch_report("weekly", "scheduled")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
+    if settings.SCHEDULER_ENABLED:
+        scheduler.add_job(
+            _run_daily_report,
+            CronTrigger(hour=9, minute=0, timezone="Asia/Shanghai"),
+            id="daily_report",
+            misfire_grace_time=_MISFIRE_GRACE_SECONDS,
+        )
+        scheduler.add_job(
+            _run_weekly_report,
+            CronTrigger(day_of_week="mon", hour=9, minute=0, timezone="Asia/Shanghai"),
+            id="weekly_report",
+            misfire_grace_time=_MISFIRE_GRACE_SECONDS,
+        )
+        scheduler.start()
+        _log.info(
+            "Scheduler started (Asia/Shanghai): %s",
+            [f"{j.id} next={j.next_run_time}" for j in scheduler.get_jobs()],
+        )
+    else:
+        _log.info("Scheduler disabled via SCHEDULER_ENABLED=false")
     yield
+    if scheduler.running:
+        scheduler.shutdown(wait=False)
 
 
 app = FastAPI(title="Nail Demo API", version="0.1.0", lifespan=lifespan)
