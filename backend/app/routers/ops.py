@@ -23,6 +23,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db import get_db
 from app.models import OpsAction, Style, StyleStats, Tryon
 from app.responses import ok
+from app.services import llm
+from app.services.assistant_tools import TOOL_SCHEMAS, dispatch
 
 router = APIRouter(prefix="/api/ops")
 
@@ -644,4 +646,164 @@ async def patch_ops_style(
         "is_active": bool(style.is_active),
         "display_order": style.display_order,
         "action_ids": [audit.id for audit in audits],
+    })
+
+
+# ===== Step 8.2: POST /api/ops/chat =====
+
+_CHAT_MAX_TOOL_ROUNDS = 3   # plan §8.2: at most 3 LLM->tools rounds
+_CHAT_HISTORY_LIMIT = 20    # keep prompt bounded; frontend sends full history
+
+# Executed tool -> frontend component name (design-docu §7.5 protocol).
+# Only ok=True results become components; error dicts go back to the LLM.
+_COMPONENT_BY_TOOL = {
+    "query_top_styles": "top_styles_table",
+    "find_trending": "trending_list",
+    "find_cold": "cold_list",
+    "compare_styles": "compare_table",
+    "execute_action": "action_result",
+}
+
+_CHAT_SYSTEM_PROMPT = (
+    "你是美甲品类运营工作台的 AI 助手，帮运营人员查数据、做判断、执行动作。\n"
+    "规则：\n"
+    "1. 涉及数据的问题必须先调用工具查询，严禁编造数字；回答要引用工具返回的具体款式名和数字。\n"
+    "2. 用户未指定参数时的默认值：query_top_styles 用 date_range=today、top_n=3；"
+    "find_trending 用 growth_threshold=0.5、min_volume=50（与爆款页同口径）；"
+    "find_cold 用 days_no_activity=7。\n"
+    "3. 只有当用户明确要求执行动作（推荐位/降序/下架）时才调用 execute_action，"
+    "执行后清楚说明做了什么动作、生效结果。\n"
+    "4. 用简体中文回复，简洁专业，不超过 150 字。明细数据由界面组件展示，"
+    "文字里点出关键结论即可，不要罗列全表。"
+)
+
+
+class ChatMessage(BaseModel):
+    role: str
+    content: str
+
+
+class ChatBody(BaseModel):
+    messages: list[ChatMessage]
+    session_id: str | None = None
+
+
+def _chat_fallback_reply(components: list[dict]) -> str:
+    """Template reply used when the LLM cannot produce final text (rate
+    limit / timeout / rounds exhausted) but tools already ran — the demo
+    must degrade to something informative, never a blank bubble."""
+    if not components:
+        return "AI 服务暂时繁忙，请稍后重试。"
+    parts: list[str] = []
+    for comp in components:
+        name, data = comp["component"], comp["data"]
+        if name == "top_styles_table" and data:
+            parts.append(f"试戴 TOP{len(data)}：{data[0]['name']} 以 {data[0]['tryon_count']} 次居首")
+        elif name == "trending_list":
+            if data:
+                names = "、".join(f"「{d['name']}」" for d in data[:3])
+                parts.append(f"发现 {len(data)} 款增长中的爆款候选：{names}")
+            else:
+                parts.append("当前没有满足阈值的爆款候选")
+        elif name == "cold_list":
+            if data:
+                names = "、".join(f"「{d['name']}」" for d in data[:3])
+                parts.append(f"发现 {len(data)} 款连续无试戴的冷门款：{names}")
+            else:
+                parts.append("没有完全无活动的款式")
+        elif name == "compare_table" and data:
+            found = [d for d in data if d.get("found")]
+            names = "、".join(f"「{d['name']}」" for d in found[:3])
+            parts.append(f"已对比 {names} 的试戴与收藏数据")
+        elif name == "action_result" and data.get("ok"):
+            parts.append(f"已对「{data.get('name', data.get('style_id'))}」执行 {data['action_type']}")
+    joined = "；".join(parts) if parts else "查询已完成"
+    return f"{joined}。详细数据见下方组件。（AI 文案生成繁忙，以上为系统摘要）"
+
+
+@router.post("/chat")
+async def ops_chat(body: ChatBody, db: AsyncSession = Depends(get_db)):
+    """Plan §8.2: assistant chat with a bounded Function-Calling loop.
+
+    messages -> LLM(strong, tools) -> [execute tool_calls -> feed back]*
+    up to _CHAT_MAX_TOOL_ROUNDS, then the last text (or a template
+    summary) is returned together with `components` derived from every
+    successfully executed tool.
+
+    Tool calls run SEQUENTIALLY, not asyncio.gather (design-docu §7.5
+    pseudo-code) — one AsyncSession must not be shared across concurrent
+    tasks, and execute_action commits mid-loop.
+    """
+    if not body.messages:
+        raise HTTPException(400, "empty_messages")
+    for m in body.messages:
+        if m.role not in {"user", "assistant"}:
+            raise HTTPException(400, "invalid_role")
+        if not m.content.strip():
+            raise HTTPException(400, "empty_content")
+    if body.messages[-1].role != "user":
+        raise HTTPException(400, "last_message_must_be_user")
+
+    history = body.messages[-_CHAT_HISTORY_LIMIT:]
+    llm_messages: list[dict] = [
+        {"role": "system", "content": _CHAT_SYSTEM_PROMPT},
+        *({"role": m.role, "content": m.content} for m in history),
+    ]
+
+    components: list[dict] = []
+    tool_rounds = 0
+    reply: str | None = None
+
+    try:
+        for _ in range(_CHAT_MAX_TOOL_ROUNDS):
+            msg = await llm.gen_text_with_tools(llm_messages, TOOL_SCHEMAS)
+            if not msg.tool_calls:
+                reply = (msg.content or "").strip()
+                break
+
+            tool_rounds += 1
+            llm_messages.append({
+                "role": "assistant",
+                "content": msg.content or "",
+                "tool_calls": [
+                    {
+                        "id": tc.id,
+                        "type": "function",
+                        "function": {
+                            "name": tc.function.name,
+                            "arguments": tc.function.arguments,
+                        },
+                    }
+                    for tc in msg.tool_calls
+                ],
+            })
+            for tc in msg.tool_calls:
+                result = await dispatch(db, tc.function.name, tc.function.arguments)
+                if result.get("ok") and tc.function.name in _COMPONENT_BY_TOOL:
+                    data = result if tc.function.name == "execute_action" else result.get("items", [])
+                    components.append({
+                        "component": _COMPONENT_BY_TOOL[tc.function.name],
+                        "data": data,
+                    })
+                llm_messages.append({
+                    "role": "tool",
+                    "tool_call_id": tc.id,
+                    "content": json.dumps(result, ensure_ascii=False, default=str),
+                })
+        else:
+            # Rounds exhausted while the model still wants tools: one last
+            # text-only call so the reply reflects gathered data.
+            final = await llm.gen_text_with_tools(llm_messages, tools=[])
+            reply = (final.content or "").strip()
+    except (llm.LLMError, llm.ConfigError):
+        reply = None  # degrade below; components (if any) still ship
+
+    if not reply:
+        reply = _chat_fallback_reply(components)
+
+    return ok(data={
+        "reply": reply,
+        "components": components,
+        "session_id": body.session_id,
+        "tool_rounds": tool_rounds,
     })

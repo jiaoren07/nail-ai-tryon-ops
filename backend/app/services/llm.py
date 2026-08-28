@@ -131,12 +131,14 @@ async def gen_text_with_tools(
     model_id = _model_id(model)
 
     async def _call():
-        return await client.chat.completions.create(
-            model=model_id,
-            messages=list(messages),
-            tools=list(tools),
-            tool_choice="auto",
-        )
+        kwargs: dict[str, Any] = {"model": model_id, "messages": list(messages)}
+        # Empty tools -> omit the params entirely: some OpenAI-compatible
+        # backends 400 on tools=[] (used by the chat loop's forced final
+        # text-only call when tool rounds are exhausted).
+        if tools:
+            kwargs["tools"] = list(tools)
+            kwargs["tool_choice"] = "auto"
+        return await client.chat.completions.create(**kwargs)
 
     resp = await _with_retry(_call)
     return resp.choices[0].message
