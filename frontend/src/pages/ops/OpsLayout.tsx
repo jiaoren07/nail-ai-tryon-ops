@@ -1,16 +1,16 @@
 import {
   AppstoreOutlined,
   BarChartOutlined,
-  BellOutlined,
   FireOutlined,
   RobotOutlined,
   SettingOutlined,
   WarningOutlined,
 } from "@ant-design/icons";
-import { Badge, Button, Drawer, FloatButton, Layout, Menu, Tag } from "antd";
+import { Drawer, FloatButton, Layout, Menu, Tag } from "antd";
 import type { MenuProps } from "antd";
 import { useState } from "react";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
+import NotificationBell from "../../components/NotificationBell";
 import ChatPanel from "./ChatPanel";
 
 const { Content, Header, Sider } = Layout;
@@ -89,15 +89,7 @@ export default function OpsLayout() {
             <Tag color="purple" bordered={false}>
               AI 驱动
             </Tag>
-            <Badge dot offset={[-5, 5]}>
-              <Button
-                type="text"
-                shape="circle"
-                size="large"
-                icon={<BellOutlined />}
-                aria-label="通知"
-              />
-            </Badge>
+            <NotificationBell />
           </div>
         </Header>
 
