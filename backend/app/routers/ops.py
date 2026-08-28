@@ -10,21 +10,29 @@ is shorthand for "B-end router".
 """
 from __future__ import annotations
 
+import asyncio
 import json
 from collections import Counter
 from datetime import date, datetime, timedelta, timezone
+from time import monotonic
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import func as sqlf
 from sqlalchemy import select, text
+from sqlalchemy import update as sql_update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db
-from app.models import OpsAction, Style, StyleStats, Tryon
+from app.models import Notification, OpsAction, Report, Style, StyleStats, Tryon
 from app.responses import ok
 from app.services import llm
 from app.services.assistant_tools import TOOL_SCHEMAS, dispatch
+from app.services.report import (
+    ReportError,
+    generate_and_dispatch_report,
+    send_report_email,
+)
 
 router = APIRouter(prefix="/api/ops")
 
@@ -807,3 +815,192 @@ async def ops_chat(body: ChatBody, db: AsyncSession = Depends(get_db)):
         "session_id": body.session_id,
         "tool_rounds": tool_rounds,
     })
+
+
+# ===== Step 9.3: reports + notifications REST =====
+
+_GENERATE_DEBOUNCE_SECONDS = 30
+# type -> monotonic timestamp of the last accepted generate call. In-process
+# state is fine: single uvicorn process by design (no workers/Redis).
+_last_generate_at: dict[str, float] = {}
+
+
+def _report_list_dict(r: Report) -> dict:
+    """List-item shape per design-docu §5.3 (no content_md)."""
+    return {
+        "id": r.id,
+        "type": r.type,
+        "title": r.title,
+        "period_start": r.period_start.isoformat(),
+        "period_end": r.period_end.isoformat(),
+        "trigger_source": r.trigger_source,
+        "email_status": r.email_status,
+        "generated_at": r.generated_at.isoformat() if r.generated_at else None,
+    }
+
+
+@router.get("/reports")
+async def list_reports(
+    type: str | None = None,
+    start_date: str | None = None,
+    end_date: str | None = None,
+    page: int = 1,
+    size: int = 20,
+    db: AsyncSession = Depends(get_db),
+):
+    """Paged report history, newest period first (design-docu §5.3)."""
+    if type is not None and type not in {"daily", "weekly"}:
+        raise HTTPException(400, "invalid_type")
+    page = max(1, page)
+    size = min(max(1, size), 100)
+
+    stmt = select(Report)
+    count_stmt = select(sqlf.count()).select_from(Report)
+    if type is not None:
+        stmt = stmt.where(Report.type == type)
+        count_stmt = count_stmt.where(Report.type == type)
+    if start_date:
+        stmt = stmt.where(Report.period_end >= start_date)
+        count_stmt = count_stmt.where(Report.period_end >= start_date)
+    if end_date:
+        stmt = stmt.where(Report.period_end <= end_date)
+        count_stmt = count_stmt.where(Report.period_end <= end_date)
+
+    total = (await db.execute(count_stmt)).scalar_one()
+    rows = (
+        await db.execute(
+            stmt.order_by(Report.period_end.desc(), Report.id.desc())
+            .offset((page - 1) * size)
+            .limit(size)
+        )
+    ).scalars().all()
+
+    return ok(data={
+        "total": int(total),
+        "page": page,
+        "size": size,
+        "items": [_report_list_dict(r) for r in rows],
+    })
+
+
+@router.get("/reports/{report_id}")
+async def get_report(report_id: int, db: AsyncSession = Depends(get_db)):
+    report = await db.get(Report, report_id)
+    if report is None:
+        raise HTTPException(404, "report_not_found")
+    data = _report_list_dict(report)
+    data.update({
+        "content_md": report.content_md,
+        "email_sent_at": report.email_sent_at.isoformat() if report.email_sent_at else None,
+        "email_error": report.email_error,
+    })
+    return ok(data=data)
+
+
+class GenerateReportBody(BaseModel):
+    type: str  # daily | weekly
+
+
+@router.post("/reports/generate")
+async def generate_report(body: GenerateReportBody):
+    """Manual trigger — same function as the cron path (§7.7.3), with a
+    30s per-type debounce so double-clicks don't stack LLM calls."""
+    if body.type not in {"daily", "weekly"}:
+        raise HTTPException(400, "invalid_type")
+
+    now = monotonic()
+    last = _last_generate_at.get(body.type)
+    if last is not None and now - last < _GENERATE_DEBOUNCE_SECONDS:
+        raise HTTPException(429, "generate_debounced")
+
+    try:
+        report_id = await generate_and_dispatch_report(body.type, "manual")
+    except ReportError as e:
+        raise HTTPException(400, str(e)) from e
+    except (llm.LLMError, llm.ConfigError) as e:
+        # Do NOT stamp the debounce window on failure — the operator must
+        # be able to retry immediately after an LLM hiccup.
+        raise HTTPException(503, "llm_unavailable") from e
+
+    _last_generate_at[body.type] = monotonic()
+    return ok(data={"report_id": report_id})
+
+
+@router.post("/reports/{report_id}/resend")
+async def resend_report(report_id: int, db: AsyncSession = Depends(get_db)):
+    """Re-fire the email for a FAILED report only (plan §9.3)."""
+    report = await db.get(Report, report_id)
+    if report is None:
+        raise HTTPException(404, "report_not_found")
+    if report.email_status != "failed":
+        raise HTTPException(400, "resend_only_failed")
+
+    report.email_status = "pending"
+    report.email_error = None
+    title, content_md = report.title, report.content_md
+    await db.commit()
+
+    asyncio.create_task(send_report_email(report_id, title, content_md))
+    return ok(data={"report_id": report_id, "email_status": "pending"})
+
+
+@router.get("/notifications")
+async def list_notifications(
+    unread_only: bool = False,
+    limit: int = 10,
+    db: AsyncSession = Depends(get_db),
+):
+    limit = min(max(1, limit), 50)
+    stmt = select(Notification).order_by(Notification.created_at.desc(), Notification.id.desc())
+    if unread_only:
+        stmt = stmt.where(Notification.is_read == 0)
+    rows = (await db.execute(stmt.limit(limit))).scalars().all()
+    return ok(data={
+        "items": [
+            {
+                "id": n.id,
+                "type": n.type,
+                "ref_id": n.ref_id,
+                "title": n.title,
+                "summary": n.summary,
+                "is_read": bool(n.is_read),
+                "created_at": n.created_at.isoformat() if n.created_at else None,
+            }
+            for n in rows
+        ],
+    })
+
+
+@router.get("/notifications/unread-count")
+async def unread_count(db: AsyncSession = Depends(get_db)):
+    count = (
+        await db.execute(
+            select(sqlf.count()).select_from(Notification).where(Notification.is_read == 0)
+        )
+    ).scalar_one()
+    return ok(data={"unread": int(count)})
+
+
+@router.post("/notifications/{notification_id}/read")
+async def mark_notification_read(
+    notification_id: int, db: AsyncSession = Depends(get_db)
+):
+    notification = await db.get(Notification, notification_id)
+    if notification is None:
+        raise HTTPException(404, "notification_not_found")
+    if not notification.is_read:
+        notification.is_read = 1
+        notification.read_at = datetime.now(timezone.utc)
+        await db.commit()
+    return ok(data={"id": notification_id, "is_read": True})
+
+
+@router.post("/notifications/read-all")
+async def mark_all_notifications_read(db: AsyncSession = Depends(get_db)):
+    result = await db.execute(
+        sql_update(Notification)
+        .where(Notification.is_read == 0)
+        .values(is_read=1, read_at=datetime.now(timezone.utc))
+    )
+    await db.commit()
+    return ok(data={"marked": int(result.rowcount or 0)})
