@@ -5,9 +5,10 @@ import O1Overview from "./pages/ops/O1Overview";
 import O2Trending from "./pages/ops/O2Trending";
 import O3Cold from "./pages/ops/O3Cold";
 import O5Chat from "./pages/ops/O5Chat";
+import O7Setting from "./pages/ops/O7Setting";
+import RDetail from "./pages/ops/RDetail";
 import O6Styles from "./pages/ops/O6Styles";
 import OpsLayout from "./pages/ops/OpsLayout";
-import OpsPlaceholder from "./pages/ops/OpsPlaceholder";
 import L0 from "./pages/user/L0";
 import U0 from "./pages/user/U0";
 import U1 from "./pages/user/U1";
@@ -45,38 +46,13 @@ export default function App() {
               />
               <Route path="trending" element={<O2Trending />} />
               <Route path="cold" element={<O3Cold />} />
-              <Route
-                path="report"
-                element={
-                  <OpsPlaceholder
-                    code="O4"
-                    title="报告中心"
-                    description="查看运营日报、周报及邮件发送状态。"
-                  />
-                }
-              />
+              {/* 独立报告中心已并入 O7「通知与邮件订阅」tab（design §7.7）；
+                  旧路径重定向而非 404，避免历史书签/通知死链 */}
+              <Route path="report" element={<Navigate to="/ops/setting" replace />} />
               <Route path="chat" element={<O5Chat />} />
               <Route path="styles" element={<O6Styles />} />
-              <Route
-                path="setting"
-                element={
-                  <OpsPlaceholder
-                    code="O7"
-                    title="设置中心"
-                    description="配置通知、邮件订阅、AI 助手偏好与界面选项。"
-                  />
-                }
-              />
-              <Route
-                path="reports/:id"
-                element={
-                  <OpsPlaceholder
-                    code="RDET"
-                    title="报告详情"
-                    description="查看报告正文、生成时间和邮件投递结果。"
-                  />
-                }
-              />
+              <Route path="setting" element={<O7Setting />} />
+              <Route path="reports/:id" element={<RDetail />} />
             </Route>
             <Route
               path="*"

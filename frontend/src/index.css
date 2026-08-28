@@ -96,3 +96,54 @@ body {
   padding: 2px 8px;
   font-size: 12px;
 }
+
+/* Step 9.4: markdown in the report detail page — document-style spacing,
+   slightly larger scale than chat bubbles. */
+.report-md h2 {
+  margin: 18px 0 8px;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.report-md h3 {
+  margin: 14px 0 6px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.report-md p {
+  margin: 6px 0;
+}
+
+.report-md ol,
+.report-md ul {
+  margin: 6px 0;
+  padding-left: 20px;
+}
+
+.report-md li {
+  margin: 3px 0;
+}
+
+.report-md table {
+  border-collapse: collapse;
+  margin: 8px 0;
+}
+
+.report-md th,
+.report-md td {
+  border: 1px solid #e6e6e6;
+  padding: 4px 10px;
+  font-size: 13px;
+}
+
+.report-md code {
+  background: #f6f7f9;
+  border-radius: 4px;
+  padding: 0 4px;
+  font-size: 12px;
+}
+
+.report-md strong {
+  font-weight: 600;
+}
