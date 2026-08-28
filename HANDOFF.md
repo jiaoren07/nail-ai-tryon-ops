@@ -12,14 +12,14 @@ that the previous session accumulated but never made explicit in the repo.
 
 Then before writing any code, **summarize the 5 workflow rules + current state + Step goal** back to the user for confirmation.
 
-## 1. Current build state (as of 2026-08-28)
+## 1. Current build state (as of 2026-08-28) — PROJECT COMPLETE
 
-- **Phase 0-9 done.** Everything except Phase 10 (E2E smoke): full user flow, full ops frontend (O1/O2/O3/O5/O6/O7 + report detail + live bell), assistant FC loop, report/notification subsystem with APScheduler (Asia/Shanghai, daily 09:00 / weekly Mon 09:00).
-- **Email so far verified with ZERO real SMTP traffic** (server run with `SMTP_HOST=smtp-disabled.invalid` → real failed-path). The live "sent" test is pending user approval; start the backend WITHOUT that override to restore real sending.
-- **Next: Phase 10 (10.1–10.4)** — data-loop smoke, IMAGE_PROVIDER=seedream switch test (user edits .env), report full-path with REAL email (user-gated), full-story smoke.
-- Rate-limit reality: BOTH PPIO tiers minute-limited (~5 req/min class); chat degrades to data-grounded template replies on 429; report generation takes ~30-60s (reasoning model).
-- Reseed does NOT touch reports/notifications/ops_actions — verification residue survives; clean demo needs manual DELETE or acceptance.
-- `git log --oneline -20` shows the trail. Batch records: progress.md "Batch A/B/C" entries.
+- **All 55 plan steps done (Phase 0-10) + 收尾清单 5/5.** The repo is at the plan's "可交付最小完整状态": root README quickstart, locked deps, aligned .env.example, fresh-DB rebuild verified, no debug routes.
+- **Real email send verified once (user-approved): report #10 → sent + inbox delivery.** Default posture per user instruction: SMTP stays ISOLATED (`$env:SMTP_HOST="smtp-disabled.invalid"` before uvicorn) unless a session actually needs real sending.
+- **DB is in clean handover state** (fresh seed, zero reports/notifications/audit residue). Old test data backed up in session scratchpad only.
+- Rate-limit reality: BOTH PPIO tiers minute-limited (~5 req/min); chat degrades to data-grounded template replies on 429; report generation 30-60s (reasoning model, comparisons precomputed in code).
+- Optional backlog (no plan steps remain): antd v6 deprecated-API sweep (Tag bordered / Drawer width / Statistic valueStyle), route-level code splitting (main chunk 2.4MB), PPIO key rotation (user does it in the PPIO console).
+- `git log --oneline -30` shows the trail. Batch records: progress.md "Batch A/B/C/D" entries.
 
 ## 2. Workflow — five hard rules
 
@@ -88,20 +88,18 @@ Every completed Step needs:
 
 3. **Update `📌 项目锁定状态` section only when a locked decision actually changes** (rare — mostly for secret rotation events or model swaps).
 
-## 6. Next step: Phase 10 — E2E smoke (final phase, 4 steps)
+## 6. Next step: none — demo/maintenance mode
 
-**Plan reference:** `implementation-plan.md` §10.1–§10.4 + 收尾清单.
+The implementation plan is exhausted (55/55 + closing checklist). What remains is operational:
 
-**Step-specific gates & facts:**
-- **10.1 data-loop smoke**: full user flow → O1 KPIs move within 10s; 60x batch tryons on one style → it appears in O2 trending. Reseed FIRST (time windows) — reseed leaves reports/notifications/ops_actions untouched.
-- **10.2 IMAGE_PROVIDER switch**: `.env` edit is the USER's action (AI does not touch .env). seedream generates real images via PPIO (~¥0.2/张); compare file sizes in static/cache (real ≥ hundreds of KB, mock = cover copy). Locked: Seedream 4.5, V1 short prompt.
-- **10.3 report full path**: needs REAL SMTP — user approval required, then start backend WITHOUT the SMTP_HOST override. Verify: bell within 5s, list within ~60s (LLM), email_status pending→sent, inbox HTML renders, detail matches email.
-- **10.4 full-story smoke**: incognito / → /upload redirect... user flow → ops flow → assistant 3 rounds. Perf targets: recommend <8s, batch tryon <15s, dashboards <3s, report <60s (plan says 30s but strong-tier reasoning generation measured 30-60s — report reality, don't fake it).
+**Demo-day runbook:**
+1. `cd backend; .venv\Scripts\python.exe -X utf8 scripts\seed_all.py` — anchors time windows to "now"; run again if a day rolls over mid-prep.
+2. Backend: `.venv\Scripts\python.exe -m uvicorn app.main:app --port 8000` (real email active — the scheduler will send at 09:00 if left running; prepend `$env:SMTP_HOST="smtp-disabled.invalid"` to isolate, the user's preferred default outside email demos).
+3. Frontend: `cd frontend; npm run dev` → http://localhost:5173.
+4. Chat demo pacing: ≥30s between assistant questions (rate limit); 429 degrades gracefully but LLM prose is nicer.
+5. Real image generation: set `IMAGE_PROVIDER=seedream` in .env (user edit) or env var; ~¥0.2/张, ~25s/张; mock is the always-works fallback.
 
-**Known cleanup items (post-Phase-10, ask user which to take):**
-- antd v6 deprecation warnings: `Tag bordered={false}` → `variant="filled"`, `Drawer width` → `size` (across O-side pages).
-- Main JS chunk 2.4MB (echarts + react-markdown full import) — route-level code splitting is now legitimate per Step 7.1's deferral note.
-- PPIO key rotation still pending (Step 4.5 partial exposure; user does it in PPIO console).
+**Optional backlog (user picks, no order implied):** antd v6 deprecated-API sweep; route-level code splitting (2.4MB chunk); PPIO key rotation (Step 4.5 residue, user console action).
 
 ## 7. If you're not sure — ask, don't guess
 
