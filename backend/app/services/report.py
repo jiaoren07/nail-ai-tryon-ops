@@ -1,4 +1,4 @@
-"""Step 9.1: report generation + dispatch pipeline.
+﻿"""Step 9.1: report generation + dispatch pipeline.
 
 One function, three entry points (design-docu §7.7.3): APScheduler cron
 (Step 9.2), the O7 manual button via POST /api/ops/reports/generate
@@ -45,7 +45,13 @@ logger = logging.getLogger("nail_demo.report")
 _BJT = timezone(timedelta(hours=8))
 
 _NOTIFICATION_SUMMARY_LEN = 120
-_REPORT_MAX_TOKENS = 2000
+# deepseek-v4-pro is a reasoning model: max_tokens covers reasoning AND
+# content. Verified failure modes: 2000 starves content to empty when the
+# model does the ring-compare arithmetic itself (~3500 reasoning tokens);
+# 4000 with long output blows the locked 60s timeout. Fix is structural —
+# comparisons are precomputed in code and the prompt caps the body at 600
+# chars — 3000 then covers a short think + full body comfortably.
+_REPORT_MAX_TOKENS = 3000
 
 
 class ReportError(Exception):
@@ -158,7 +164,12 @@ async def _aggregate_stats(db, report_type: str, start: date, end: date) -> dict
     if report_type == "daily":
         yesterday = start - timedelta(days=1)
         previous = await _window_stats(db, yesterday, yesterday)
-        return {"period": f"{start} ~ {end}", "today": current, "yesterday": previous}
+        return {
+            "period": f"{start} ~ {end}",
+            "today": current,
+            "yesterday": previous,
+            "comparison_precomputed": _compare_windows(current, previous),
+        }
 
     prev_start = start - timedelta(days=7)
     prev_end = end - timedelta(days=7)
@@ -167,6 +178,28 @@ async def _aggregate_stats(db, report_type: str, start: date, end: date) -> dict
         "period": f"{start} ~ {end}",
         "this_week": current,
         "last_week": previous,
+        "comparison_precomputed": _compare_windows(current, previous),
+    }
+
+
+def _compare_windows(current: dict, previous: dict) -> dict:
+    """Ring-compare numbers computed IN CODE so the reasoning model does
+    not burn its token budget on arithmetic (observed: self-computed
+    comparisons pushed reasoning past max_tokens, yielding empty content).
+    """
+    def pct(cur: float, prev: float) -> float | None:
+        return round((cur - prev) / prev * 100, 1) if prev else None
+
+    return {
+        "tryon_total_change_percent": pct(
+            current["tryon_total"], previous["tryon_total"]
+        ),
+        "collect_total_change_percent": pct(
+            current["collect_total"], previous["collect_total"]
+        ),
+        "collect_rate_change_pp": round(
+            (current["collect_rate"] - previous["collect_rate"]) * 100, 1
+        ),
     }
 
 
@@ -183,12 +216,15 @@ def _build_prompt(report_type: str, stats: dict) -> str:
             "4. 运营建议：3–5 条可执行建议，每条须引用具体数据\n"
             "5. 关键问题：1–2 个需运营拍板的开放问题\n"
             "语言风格：简洁专业，避免空话。\n"
-            "输出 Markdown 正文，用 ## 分节；数据中没有的维度（如库存）如实说明暂无数据，不得编造。"
+            "输出 Markdown 正文，用 ## 分节，全文 600 字以内；"
+            "comparison_precomputed 内是已算好的环比，直接引用不要自行推算；"
+            "数据中没有的维度（如库存）一句话说明暂无数据即可，不得编造。"
         )
     return (
         "你是平台美甲品类的运营助手。基于以下本周与上周对比数据，生成一份周报。\n"
         f"本周数据：{json.dumps(stats['this_week'], ensure_ascii=False)}\n"
         f"上周数据：{json.dumps(stats['last_week'], ensure_ascii=False)}\n"
+        f"已算好的周环比：{json.dumps(stats['comparison_precomputed'], ensure_ascii=False)}\n"
         f"统计周期：{stats['period']}\n"
         "要求章节：\n"
         "1. 本周总览：试戴总量、转化率、活跃款式数（含周环比）\n"
@@ -198,7 +234,8 @@ def _build_prompt(report_type: str, stats: dict) -> str:
         "5. 运营建议：3–5 条针对下周的具体动作\n"
         "6. 待决问题：1–2 个需要拍板的运营决策\n"
         "语言风格：简洁专业，引用具体数字，体现\"周\"的时间维度。\n"
-        "输出 Markdown 正文，用 ## 分节；数据中未提供的维度如实说明暂无数据，不得编造。"
+        "输出 Markdown 正文，用 ## 分节，全文 600 字以内；"
+        "环比直接引用给定数值不要自行推算；数据中未提供的维度一句话说明暂无数据即可，不得编造。"
     )
 
 
@@ -208,7 +245,7 @@ def _build_title(report_type: str, start: date, end: date) -> str:
     return f"美甲品类周报 {start.isoformat()} ~ {end.isoformat()}"
 
 
-async def _send_report_email(report_id: int, title: str, content_md: str) -> None:
+async def send_report_email(report_id: int, title: str, content_md: str) -> None:
     """Background email task. Owns its own session; never raises."""
     status, error, sent_at = "sent", None, datetime.now(timezone.utc)
     try:
@@ -246,11 +283,18 @@ async def generate_and_dispatch_report(
         stats = await _aggregate_stats(db, report_type, period_start, period_end)
 
         prompt = _build_prompt(report_type, stats)
-        content_md = await llm.gen_text(
-            prompt, model="strong", max_tokens=_REPORT_MAX_TOKENS
-        )
+        # Strong-tier reasoning models occasionally return empty content
+        # (all budget spent on reasoning); one immediate retry recovers it.
+        content_md = ""
+        for _attempt in range(2):
+            content_md = await llm.gen_text(
+                prompt, model="strong", max_tokens=_REPORT_MAX_TOKENS
+            )
+            if content_md.strip():
+                break
+            logger.warning("empty %s report content, retrying once", report_type)
         if not content_md.strip():
-            raise llm.LLMError("empty report content from LLM")
+            raise llm.LLMError("empty report content from LLM after retry")
 
         title = _build_title(report_type, period_start, period_end)
         report = Report(
@@ -278,7 +322,7 @@ async def generate_and_dispatch_report(
         report_id = report.id
 
     # Fire-and-forget so the caller (cron / HTTP / assistant) returns fast.
-    asyncio.create_task(_send_report_email(report_id, title, content_md))
+    asyncio.create_task(send_report_email(report_id, title, content_md))
     logger.info(
         "report %s generated (%s, %s, %s~%s)",
         report_id, report_type, trigger_source, period_start, period_end,
