@@ -825,6 +825,15 @@ _GENERATE_DEBOUNCE_SECONDS = 30
 _last_generate_at: dict[str, float] = {}
 
 
+def _iso_utc(dt: datetime | None) -> str | None:
+    """Serialize DB datetimes with an explicit UTC offset. Columns using
+    server_default current_timestamp store NAIVE UTC — bare isoformat()
+    would be parsed as local time by the frontend (seen as an 8h skew)."""
+    if dt is None:
+        return None
+    return dt.isoformat() if dt.tzinfo else dt.isoformat() + "+00:00"
+
+
 def _report_list_dict(r: Report) -> dict:
     """List-item shape per design-docu §5.3 (no content_md)."""
     return {
@@ -835,7 +844,7 @@ def _report_list_dict(r: Report) -> dict:
         "period_end": r.period_end.isoformat(),
         "trigger_source": r.trigger_source,
         "email_status": r.email_status,
-        "generated_at": r.generated_at.isoformat() if r.generated_at else None,
+        "generated_at": _iso_utc(r.generated_at),
     }
 
 
@@ -891,7 +900,7 @@ async def get_report(report_id: int, db: AsyncSession = Depends(get_db)):
     data = _report_list_dict(report)
     data.update({
         "content_md": report.content_md,
-        "email_sent_at": report.email_sent_at.isoformat() if report.email_sent_at else None,
+        "email_sent_at": _iso_utc(report.email_sent_at),
         "email_error": report.email_error,
     })
     return ok(data=data)
@@ -964,7 +973,7 @@ async def list_notifications(
                 "title": n.title,
                 "summary": n.summary,
                 "is_read": bool(n.is_read),
-                "created_at": n.created_at.isoformat() if n.created_at else None,
+                "created_at": _iso_utc(n.created_at),
             }
             for n in rows
         ],
