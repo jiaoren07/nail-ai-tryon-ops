@@ -12,12 +12,13 @@ that the previous session accumulated but never made explicit in the repo.
 
 Then before writing any code, **summarize the 5 workflow rules + current state + Step goal** back to the user for confirmation.
 
-## 1. Current build state (as of 2026-08-27)
+## 1. Current build state (as of 2026-08-28)
 
-- **Phase 0-7 done** — scaffolding, DB seed, backend C-side + B-side APIs (Phase 6 was 5 steps, all done), AI service layer, full user flow (L0 → U0 → U1 → U2 → U3 → U4 → U5), full ops frontend (7.1 layout / 7.2 O1 overview / 7.3 O2 trending / 7.4 O3 cold / 7.5 O6 styles).
-- **Frontend lint is at 0 errors** (only 2 intentional U4 exhaustive-deps warnings remain — fixing them changes effect re-run behavior, leave them).
-- **Next: Step 8.1** — Function Calling tool-set definition (`backend/app/services/assistant_tools.py`, 5 tools per design-docu §5.3).
-- `git log --oneline -15` shows the last commits with `feat(backend|frontend): Step X.Y ...` naming. Detailed batch record: progress.md "Batch A" entry.
+- **Phase 0-8 done** — scaffolding, DB seed, backend C-side + B-side APIs, AI service layer, full user flow (L0 → U5), full ops frontend (O1/O2/O3/O6), and the AI assistant end-to-end: 8.1 tool set (`services/assistant_tools.py`), 8.2 `POST /api/ops/chat` FC loop, 8.3 O5 chat panel (FloatButton→Drawer + `/ops/chat` full page, react-markdown user-approved).
+- **Frontend lint is at 0 errors** (only 2 intentional U4 exhaustive-deps warnings).
+- **Next: Step 9.1** — `backend/app/services/report.py` `generate_and_dispatch_report(report_type, trigger_source)`. ⚠️ STOP before any real SMTP send (batch-mode standing stop condition); 9.2 APScheduler MUST set timezone="Asia/Shanghai" explicitly.
+- Rate-limit reality: BOTH PPIO tiers are minute-limited (~5 req/min class). The chat endpoint degrades to a data-grounded template reply on 429 (never a blank bubble). Space demo questions ≥30s.
+- `git log --oneline -15` shows the trail. Batch records: progress.md "Batch A" / "Batch B" entries.
 
 ## 2. Workflow — five hard rules
 
@@ -86,21 +87,22 @@ Every completed Step needs:
 
 3. **Update `📌 项目锁定状态` section only when a locked decision actually changes** (rare — mostly for secret rotation events or model swaps).
 
-## 6. Next step: Step 8.1 — Function Calling tool-set (Phase 8 opener)
+## 6. Next step: Step 9.1 — report generation service (Phase 9 opener)
 
-**Plan reference:** `implementation-plan.md` §8.1. Batch-mode note: 8.1 gates individually (pause and confirm tool schemas with the user before starting 8.2/8.3) because LLM function-calling behavior against PPIO is the riskiest remaining area.
+**Plan reference:** `implementation-plan.md` §9.1; flow per design-docu §7.7.3, prompts per §7.4 (daily/weekly templates), failure policy per §7.7.7.
 
 **Deliverables:**
-- `backend/app/services/assistant_tools.py` — 5 tools in OpenAI tools JSON-Schema format per plan §8.1 literal: `query_top_styles(date_range, top_n, gender?)`, `compare_styles(style_ids[], date_range)`, `find_trending(growth_threshold, min_volume)`, `find_cold(days_no_activity)`, `execute_action(style_id, action_type)`.
-- Pure functions returning dicts (NOT HTTP responses) + a name→function dispatcher.
-- `execute_action` MUST route through the same mutation+audit path as `/api/ops/actions` — reuse `_apply_action_and_audit(...)` in `ops.py`, do not bypass the audit contract.
+- `backend/app/services/report.py` — `generate_and_dispatch_report(report_type, trigger_source) -> report_id`: aggregate data → LLM markdown (strong tier) → insert `reports` row → insert `notifications` row → async email (`asyncio.create_task`, non-blocking) → update `email_status`.
+- LLM failure → raise + rollback; email failure → `email_status="failed"` + `email_error` only (report/notification rows stay).
 
-**Environment facts that matter for Phase 8:**
-- LLM strong tier = `deepseek/deepseek-v4-pro` (supports FC), quick tier = `qwen/qwen3-next-80b-a3b-instruct`, both via PPIO. `TIMEOUT_SECONDS=60`.
-- PPIO quick tier is rate-limited to 5 req/min on this key — chat loops must be single-call per user turn, no parallel tool-result summarization fan-out.
-- Ops endpoints have no auth (demo scope); the assistant executes actions as `operator="ai_assistant"` which is already the audit default.
+**Standing stop conditions that WILL trigger in Phase 9:**
+- ⚠️ Real SMTP send: ask the user before the first live email test (SMTP creds in backend/.env were user-rotated; AI must not print them).
+- 9.2 APScheduler: `AsyncIOScheduler` in main.py startup, `timezone="Asia/Shanghai"` explicitly on every CronTrigger (daily 09:00; weekly Mon 09:00); manual trigger endpoint runs the SAME function with `trigger_source="manual"`.
 
-**Verify pattern:** `backend/scripts/_check_assistant_tools.py` — direct function-call harness first (no LLM), then one real FC round-trip against PPIO strong model.
+**Environment facts:**
+- Both PPIO tiers minute-rate-limited (~5 req/min class); report generation is 1 LLM call — fine. Chat + report simultaneously may contend.
+- Email service (`services/email.py`, Step 3.4) is SMTPS :465 via `smtplib.SMTP_SSL` + `asyncio.to_thread`, `wrap_html` per design-docu §7.7.4 — reuse, do not rewrite.
+- Assistant tool `execute_action` and REST actions share `_apply_action_and_audit` + `_target_order_for_action` in ops.py — Phase 9's manual-trigger endpoint should NOT bypass `generate_and_dispatch_report` either (three entries, one code path: scheduler / settings button / assistant).
 
 ## 7. If you're not sure — ask, don't guess
 

@@ -1915,6 +1915,42 @@ benchmark 时发现原 `.env` 写的 model ID 在 PPIO 实际不可用 / 不合�
 
 ---
 
+### ✅ Batch B · Step 8.1–8.3 AI 助手全链路 — 2026-08-28
+
+> 批式模式第二批。8.1 按约定单独停过一次（用户确认 3 个 schema 设计决策后才进 8.2）；
+> react-markdown 依赖经用户显式批准安装。
+
+**做了什么（3 个 commit）：**
+- **Step 8.1 `bf3139b`** services/assistant_tools.py：5 工具（plan §8.1 字面签名）+ TOOL_SCHEMAS（OpenAI 格式）+ dispatch（收 dict 或 JSON 字符串）。全部返回 dict；坏输入回 `{ok:false,error}` 不抛异常。execute_action 复用 ops.py `_apply_action_and_audit`；ops.py 抽出 `_target_order_for_action`（boost=min-1/demote=max+1）双方共用。
+- **Step 8.2 `c308650`** POST /api/ops/chat：校验（末条必须 user）→ system prompt（固化默认参数口径 today/3、0.5/50、7 天；仅明确要求才执行动作）+ 近 20 条历史 → strong 档 FC 循环 ≤3 轮，耗尽后追加纯文本收尾调用。tool_calls 顺序执行（AsyncSession 不可并发共享，弃用 design 草案 gather）。components[] 由成功工具推导（5 种映射）。LLM 失败降级 `_chat_fallback_reply`：用工具真实数据生成点名摘要，永不空白。llm.py 支持空 tools 时省略参数。
+- **Step 8.3 `29038cd`** ChatPanel（气泡流 + react-markdown + 组件协议渲染：表格/列表/sparkline/动作卡 + JSON 兜底）挂两处：OpsLayout FloatButton→Drawer（主入口）+ /ops/chat 全页版（菜单入口，该页藏悬浮按钮）。回车发送/Shift 换行、示例问题 chip、失败红字气泡。
+
+**Batch B 验证（真实 PPIO deepseek-v4-pro）：**
+
+| 验证项 | 实测 |
+|---|---|
+| 8.1 直调 9-case | ✅ ALL PASS：top3 有序/male 过滤/compare found=false/trending 与 REST 集合一致/cold=0 活动语义/boost SQL 实证+audit/6 错误路径/dispatch JSON 字符串 |
+| 8.1 REST 回归 | ✅ 6.4、6.5 脚本 ALL PASS（发现两脚本连跑互污染 f_25：正确顺序 reseed→6.5→6.4） |
+| 8.2 plan 三问 | ✅ 4/4：T1 回复点名榜首+表格 3 行（9.4s）；T2 f_15 order=min+audit(boost/ai_assistant)；T3 点名 3 款带增长率；T4 三种非法请求 400 |
+| 8.2 限速实测 | ✅ strong 档也是分钟级限速：连续快问第 6 次调用 429×3 重试失败→兜底模板生效（含款式名）。脚本问间隔 30s |
+| 8.3 浏览器实测 | ✅ 悬浮→抽屉；问 1 表格渲染 3 行；问 2 action_result 卡（-3→-4, audit#45）+O6 第一行 f_15；全页版+菜单高亮+防叠加 |
+| 质量门 | ✅ 每步 py_compile / eslint 0 error / tsc / vite build |
+
+**几个设计选择（透明告知）：**
+1. **8.1 三决策已经用户确认**：find_trending 只参数化签名两规则（collect_rate 作返回字段）；find_cold 按字面"连续 N 天 0 试戴"（窄于 O3 规则）；_check 脚本按仓库惯例保留（plan 字面要删）。
+2. **429 应对选"快速失败+数据兜底"而非拉长重试**：分钟级限速窗口下 35s+ 重试会挂死前端；兜底模板直接用工具真实数据点名（MockProvider 哲学延续），气泡永不空白、信息不缺。
+3. **组件由后端从执行过的工具推导**，不让 LLM 输出组件 JSON——协议稳定性优先于灵活性。
+4. **两个聊天入口独立会话**（Drawer 与全页版各自 state）：后端无状态、历史由前端全量携带，不引入会话表。
+
+**给后续开发者的提示：**
+- 下一批 **Phase 9（9.1–9.5）报告通知子系统**：9.1 generate_and_dispatch_report 是核心；**真实 SMTP 发信前必须停下问用户**（批式约定的停止条件）。9.2 APScheduler 务必显式 timezone="Asia/Shanghai"。
+- 聊天回归验证前必须 reseed（today 窗口跨天即空）且 uvicorn 重启加载新代码（无 --reload）。
+- strong 档限速约每分钟 5 次量级：连续对话每问 2 次调用，第 3 问起可能触顶走兜底。演示时问题间隔 ≥30s 体验最佳。
+- `_check_chat_api.py` 每跑一次 boost f_15 一次（order 持续下探），演示前 reseed。
+- 8.2 的 `components` 里 `mini_trend` 前端已支持但后端暂无工具产出；Phase 9 报告或未来 compare 增强可复用。
+
+---
+
 ### 📌 项目锁定状态 + 公约提醒（无需每步更新，状态真变才改）
 
 > 本段是**稳定的锁定状态指针**，不是 step-by-step 的进度条。
