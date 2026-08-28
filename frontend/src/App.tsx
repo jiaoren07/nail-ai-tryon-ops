@@ -4,6 +4,7 @@ import Placeholder from "./components/Placeholder";
 import O1Overview from "./pages/ops/O1Overview";
 import O2Trending from "./pages/ops/O2Trending";
 import O3Cold from "./pages/ops/O3Cold";
+import O5Chat from "./pages/ops/O5Chat";
 import O6Styles from "./pages/ops/O6Styles";
 import OpsLayout from "./pages/ops/OpsLayout";
 import OpsPlaceholder from "./pages/ops/OpsPlaceholder";
@@ -54,16 +55,7 @@ export default function App() {
                   />
                 }
               />
-              <Route
-                path="chat"
-                element={
-                  <OpsPlaceholder
-                    code="O5"
-                    title="AI 助手"
-                    description="用自然语言查询运营数据并执行经过确认的运营动作。"
-                  />
-                }
-              />
+              <Route path="chat" element={<O5Chat />} />
               <Route path="styles" element={<O6Styles />} />
               <Route
                 path="setting"

@@ -57,3 +57,42 @@ body {
 .ops-header {
   line-height: normal;
 }
+
+/* Step 8.3: markdown inside assistant chat bubbles — ReactMarkdown's
+   default block margins are tuned for documents, not bubbles. Tighten. */
+.chat-md p {
+  margin: 0;
+}
+
+.chat-md p + p {
+  margin-top: 6px;
+}
+
+.chat-md ol,
+.chat-md ul {
+  margin: 4px 0 0;
+  padding-left: 18px;
+}
+
+.chat-md li {
+  margin-top: 2px;
+}
+
+.chat-md code {
+  background: #f6f7f9;
+  border-radius: 4px;
+  padding: 0 4px;
+  font-size: 12px;
+}
+
+.chat-md table {
+  border-collapse: collapse;
+  margin-top: 6px;
+}
+
+.chat-md th,
+.chat-md td {
+  border: 1px solid #e6e6e6;
+  padding: 2px 8px;
+  font-size: 12px;
+}

@@ -7,9 +7,11 @@ import {
   SettingOutlined,
   WarningOutlined,
 } from "@ant-design/icons";
-import { Badge, Button, Layout, Menu, Tag } from "antd";
+import { Badge, Button, Drawer, FloatButton, Layout, Menu, Tag } from "antd";
 import type { MenuProps } from "antd";
+import { useState } from "react";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
+import ChatPanel from "./ChatPanel";
 
 const { Content, Header, Sider } = Layout;
 
@@ -41,8 +43,12 @@ function activeMenuKey(pathname: string): string | undefined {
 export default function OpsLayout() {
   const location = useLocation();
   const navigate = useNavigate();
+  const [chatOpen, setChatOpen] = useState(false);
   const selectedKey = activeMenuKey(location.pathname);
   const pageTitle = PAGE_TITLES[selectedKey ?? location.pathname] ?? "运营工作台";
+  // The /ops/chat route hosts the full-page panel — hide the floating
+  // entry there so the assistant doesn't stack on top of itself.
+  const onChatPage = location.pathname.startsWith("/ops/chat");
 
   return (
     <Layout className="ops-shell min-h-screen">
@@ -99,6 +105,32 @@ export default function OpsLayout() {
           <Outlet />
         </Content>
       </Layout>
+
+      {!onChatPage && (
+        <FloatButton
+          type="primary"
+          icon={<RobotOutlined />}
+          tooltip="AI 运营助手"
+          style={{ right: 28, bottom: 28 }}
+          onClick={() => setChatOpen(true)}
+        />
+      )}
+      <Drawer
+        title={
+          <span className="flex items-center gap-2">
+            AI 运营助手
+            <Tag color="purple" bordered={false}>
+              Function Calling
+            </Tag>
+          </span>
+        }
+        width={480}
+        open={chatOpen}
+        onClose={() => setChatOpen(false)}
+        styles={{ body: { display: "flex", flexDirection: "column", padding: 16 } }}
+      >
+        <ChatPanel />
+      </Drawer>
     </Layout>
   );
 }
