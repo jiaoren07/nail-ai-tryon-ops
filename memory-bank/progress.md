@@ -1951,6 +1951,46 @@ benchmark 时发现原 `.env` 写的 model ID 在 PPIO 实际不可用 / 不合�
 
 ---
 
+### ✅ Batch C · Step 9.1–9.5 报告通知子系统 + O7 — 2026-08-28
+
+> 批式模式第三批。全程 email 打桩/隔离（SMTP_HOST=smtp-disabled.invalid），
+> 零真实外发流量；真实 SMTP 发信留待用户批准（批末询问）。
+
+**做了什么（7 个 commit）：**
+- **9.1 `317ea2f`** services/report.py：generate_and_dispatch_report 统一链路（聚合→strong LLM Markdown→reports→notifications→异步邮件→状态更新）。LLM 失败零落库；邮件失败仅记 failed。周期口径：daily=今天+昨日同期环比（同 O1）；weekly=最近完整周一~周日 vs 再前一周。
+- **9.2 `cc343ff`** APScheduler 进程内调度：daily 09:00 / weekly 周一 09:00，全部显式 Asia/Shanghai，misfire_grace 3600；SCHEDULER_ENABLED=false 不启动。临时 _debug/scheduler 路由验证后已按 plan 删除。
+- **fix `26499e0`** 报告空内容结构性修复：诊断脚本抓到 finish_reason=length（reasoning 3496 token 烧光 2000 预算算环比）/4000 又超 60s。修复=环比在代码里预计算注入 prompt + 正文限 600 字 + max_tokens=3000。
+- **9.3 `33cc8fb`** 7 个 REST：reports 分页列表/详情/generate（30s 防抖、失败不占坑、LLM 故障 503）/resend（仅 failed）/notifications 列表/unread-count/read/read-all。
+- **fix `ff450a5`** naive-UTC 时间戳序列化补 +00:00（前端此前显示差 8 小时）。
+- **9.4 `4e765c9`** O7 设置中心（4 tab，通知与邮件订阅实质：订阅表单 localStorage + 最近 10 份报告 + 立即生成按钮）+ RDetail 报告详情（markdown + 元信息卡 + failed 重发）。旧 /ops/report 重定向 /ops/setting；OpsPlaceholder 死代码删除。
+- **9.5 `d77f68d`** NotificationBell 真实数据：5s 轮询红点、抽屉最近 10 条、点击已读+跳详情、全部已读。
+
+**Batch C 验证（全部实测）：**
+
+| 验证项 | 实测 |
+|---|---|
+| 9.1 服务 5-case | ✅ ALL PASS：daily/weekly 落库全字段、stub 成功→sent、stub 失败→failed+error 且行保留、monthly→ReportError、LLM 故障→零落库回滚 |
+| 9.2 调度 | ✅ daily next=08-29 09:00:00+08:00 / weekly=08-31（当前 15:49 已过今日 9 点，非 UTC）；disabled 分支 jobs=0 |
+| 9.3 接口 9-case | ✅ ALL PASS：generate→id（47.5s）、防抖 429、unread+1、过滤分页、详情 failed+error、resend 规则、已读/全读、404/400 |
+| 9.4 页面 | ✅ 4 tab 默认落订阅 tab；列表 7→8 行（生成周报实测 ~50s，plan 的 10s 是低估）；详情 markdown 分节+元信息+重发按钮；旧路径重定向 |
+| 9.5 铃铛 | ✅ 生成后 5s 红点 1；抽屉 8 条未读带点；点击→/ops/reports/8 且服务端 unread 1→0 |
+| 质量门 | ✅ 每步 py_compile/eslint 0 error/tsc/build；9.1 修复后回归重跑 ALL PASS |
+
+**几个设计选择（透明告知）：**
+1. **验证期发信隔离方案**：服务以 SMTP_HOST=smtp-disabled.invalid（保留 TLD 必然 DNS 失败）启动，failed 路径全真实、零外发、不触碰 .env 明文。
+2. **报告环比由代码预计算**：把算术从 reasoning LLM 拿回来是根治（省 3000+ 思考 token），也让数字可信度与 O1 完全一致。
+3. **防抖失败不占坑**：LLM 故障后运营可立即重试；只有成功才记 30s 窗口。
+4. **daily 覆盖"今天"而非"昨天"**：与 O1 同口径，демо 手动触发立即有数据；定时 09:00 场景的语义损失可接受并已记录。
+5. **HMR 污染识别**：验证中 Badge 滞留旧值系 Vite HMR 泄漏旧组件 interval（同一毫秒 5 条并发轮询），整页刷新消失；生产构建无此问题。
+
+**给后续开发者的提示：**
+- **下一批 Phase 10（10.1–10.4 端到端冒烟）**，是最后一个 Phase。10.2 要切 IMAGE_PROVIDER=seedream 真实生图（改 .env 由用户执行）；10.3 报告全链路需要真实 SMTP（等用户批准）。
+- 正常启动后端（不带 SMTP_HOST 覆盖）即恢复真实发信能力；.env 的 REPORT_RECIPIENT 是收件人。
+- antd v6 弃用警告（Tag bordered={false}→variant、Drawer width→size）遍布 O 端页面，属全仓统一清理项，Phase 10 后视情处理。
+- 库里现有 8 份报告/8 条通知全是验证残留。**已确认 seed_all.py 不触碰 reports/notifications/ops_actions 三张表**（只重建 styles/tryons/style_stats），reseed 后残留仍在；正式演示想要干净报告流水需手动 `DELETE FROM reports; DELETE FROM notifications;` 或接受残留（残留内容本身是真实生成的报告，演示未必是坏事）。
+
+---
+
 ### 📌 项目锁定状态 + 公约提醒（无需每步更新，状态真变才改）
 
 > 本段是**稳定的锁定状态指针**，不是 step-by-step 的进度条。

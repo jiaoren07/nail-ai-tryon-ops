@@ -14,11 +14,12 @@ Then before writing any code, **summarize the 5 workflow rules + current state +
 
 ## 1. Current build state (as of 2026-08-28)
 
-- **Phase 0-8 done** — scaffolding, DB seed, backend C-side + B-side APIs, AI service layer, full user flow (L0 → U5), full ops frontend (O1/O2/O3/O6), and the AI assistant end-to-end: 8.1 tool set (`services/assistant_tools.py`), 8.2 `POST /api/ops/chat` FC loop, 8.3 O5 chat panel (FloatButton→Drawer + `/ops/chat` full page, react-markdown user-approved).
-- **Frontend lint is at 0 errors** (only 2 intentional U4 exhaustive-deps warnings).
-- **Next: Step 9.1** — `backend/app/services/report.py` `generate_and_dispatch_report(report_type, trigger_source)`. ⚠️ STOP before any real SMTP send (batch-mode standing stop condition); 9.2 APScheduler MUST set timezone="Asia/Shanghai" explicitly.
-- Rate-limit reality: BOTH PPIO tiers are minute-limited (~5 req/min class). The chat endpoint degrades to a data-grounded template reply on 429 (never a blank bubble). Space demo questions ≥30s.
-- `git log --oneline -15` shows the trail. Batch records: progress.md "Batch A" / "Batch B" entries.
+- **Phase 0-9 done.** Everything except Phase 10 (E2E smoke): full user flow, full ops frontend (O1/O2/O3/O5/O6/O7 + report detail + live bell), assistant FC loop, report/notification subsystem with APScheduler (Asia/Shanghai, daily 09:00 / weekly Mon 09:00).
+- **Email so far verified with ZERO real SMTP traffic** (server run with `SMTP_HOST=smtp-disabled.invalid` → real failed-path). The live "sent" test is pending user approval; start the backend WITHOUT that override to restore real sending.
+- **Next: Phase 10 (10.1–10.4)** — data-loop smoke, IMAGE_PROVIDER=seedream switch test (user edits .env), report full-path with REAL email (user-gated), full-story smoke.
+- Rate-limit reality: BOTH PPIO tiers minute-limited (~5 req/min class); chat degrades to data-grounded template replies on 429; report generation takes ~30-60s (reasoning model).
+- Reseed does NOT touch reports/notifications/ops_actions — verification residue survives; clean demo needs manual DELETE or acceptance.
+- `git log --oneline -20` shows the trail. Batch records: progress.md "Batch A/B/C" entries.
 
 ## 2. Workflow — five hard rules
 
@@ -87,22 +88,20 @@ Every completed Step needs:
 
 3. **Update `📌 项目锁定状态` section only when a locked decision actually changes** (rare — mostly for secret rotation events or model swaps).
 
-## 6. Next step: Step 9.1 — report generation service (Phase 9 opener)
+## 6. Next step: Phase 10 — E2E smoke (final phase, 4 steps)
 
-**Plan reference:** `implementation-plan.md` §9.1; flow per design-docu §7.7.3, prompts per §7.4 (daily/weekly templates), failure policy per §7.7.7.
+**Plan reference:** `implementation-plan.md` §10.1–§10.4 + 收尾清单.
 
-**Deliverables:**
-- `backend/app/services/report.py` — `generate_and_dispatch_report(report_type, trigger_source) -> report_id`: aggregate data → LLM markdown (strong tier) → insert `reports` row → insert `notifications` row → async email (`asyncio.create_task`, non-blocking) → update `email_status`.
-- LLM failure → raise + rollback; email failure → `email_status="failed"` + `email_error` only (report/notification rows stay).
+**Step-specific gates & facts:**
+- **10.1 data-loop smoke**: full user flow → O1 KPIs move within 10s; 60x batch tryons on one style → it appears in O2 trending. Reseed FIRST (time windows) — reseed leaves reports/notifications/ops_actions untouched.
+- **10.2 IMAGE_PROVIDER switch**: `.env` edit is the USER's action (AI does not touch .env). seedream generates real images via PPIO (~¥0.2/张); compare file sizes in static/cache (real ≥ hundreds of KB, mock = cover copy). Locked: Seedream 4.5, V1 short prompt.
+- **10.3 report full path**: needs REAL SMTP — user approval required, then start backend WITHOUT the SMTP_HOST override. Verify: bell within 5s, list within ~60s (LLM), email_status pending→sent, inbox HTML renders, detail matches email.
+- **10.4 full-story smoke**: incognito / → /upload redirect... user flow → ops flow → assistant 3 rounds. Perf targets: recommend <8s, batch tryon <15s, dashboards <3s, report <60s (plan says 30s but strong-tier reasoning generation measured 30-60s — report reality, don't fake it).
 
-**Standing stop conditions that WILL trigger in Phase 9:**
-- ⚠️ Real SMTP send: ask the user before the first live email test (SMTP creds in backend/.env were user-rotated; AI must not print them).
-- 9.2 APScheduler: `AsyncIOScheduler` in main.py startup, `timezone="Asia/Shanghai"` explicitly on every CronTrigger (daily 09:00; weekly Mon 09:00); manual trigger endpoint runs the SAME function with `trigger_source="manual"`.
-
-**Environment facts:**
-- Both PPIO tiers minute-rate-limited (~5 req/min class); report generation is 1 LLM call — fine. Chat + report simultaneously may contend.
-- Email service (`services/email.py`, Step 3.4) is SMTPS :465 via `smtplib.SMTP_SSL` + `asyncio.to_thread`, `wrap_html` per design-docu §7.7.4 — reuse, do not rewrite.
-- Assistant tool `execute_action` and REST actions share `_apply_action_and_audit` + `_target_order_for_action` in ops.py — Phase 9's manual-trigger endpoint should NOT bypass `generate_and_dispatch_report` either (three entries, one code path: scheduler / settings button / assistant).
+**Known cleanup items (post-Phase-10, ask user which to take):**
+- antd v6 deprecation warnings: `Tag bordered={false}` → `variant="filled"`, `Drawer width` → `size` (across O-side pages).
+- Main JS chunk 2.4MB (echarts + react-markdown full import) — route-level code splitting is now legitimate per Step 7.1's deferral note.
+- PPIO key rotation still pending (Step 4.5 partial exposure; user does it in PPIO console).
 
 ## 7. If you're not sure — ask, don't guess
 
