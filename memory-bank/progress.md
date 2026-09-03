@@ -835,7 +835,7 @@ benchmark 时发现原 `.env` 写的 model ID 在 PPIO 实际不可用 / 不合�
 | 3. SMTP 配置 4 项都空时抛 `EmailSendError`，message 显式指出缺哪几项 | ✅ |
 | 4. 空 `to` 抛 `EmailSendError("recipient 'to' is empty")` | ✅ |
 | 5. 假 SMTP host 抛 `EmailSendError`，底层 `SSLEOFError` 通过 `__cause__` 保留 | ✅ |
-| 6. **真实发邮件**：QQ smtp.qq.com:465 → 用户的 277092506@qq.com，API 2.81s 完成 | ✅ |
+| 6. **真实发邮件**：QQ smtp.qq.com:465 → 用户本人 QQ 邮箱（此处已打码），API 2.81s 完成 | ✅ |
 | 7. **用户手动确认 30 秒内收到邮件，HTML 渲染正常** | ✅ |
 
 **产品架构澄清（用户提的好问题）：发件 vs 收件是两个独立角色**
@@ -849,7 +849,7 @@ benchmark 时发现原 `.env` 写的 model ID 在 PPIO 实际不可用 / 不合�
 未来 docu 可在 design-docu §7.7 增一段"production-readiness"小节明确这事，**暂时不动**——当前 demo 阶段够用，docu 写早了等下个版本又要改。
 
 **安全：授权码已轮换**
-用户在对话里贴出了 SMTP 授权码 `vxhqqacvdibebjci`——同 Step 3.3 的 PPIO key 类似的对话历史泄露风险。验证完成后用户**立即在 QQ 控制台重新生成了新授权码**，并由用户自己手动改进 `.env`（**没经过对话**），从根本上避免新码再次泄露。
+用户在对话里贴出了 SMTP 授权码（此处已打码；该码已作废）——同 Step 3.3 的 PPIO key 类似的对话历史泄露风险。验证完成后用户**立即在 QQ 控制台重新生成了新授权码**，并由用户自己手动改进 `.env`（**没经过对话**），从根本上避免新码再次泄露。
 
 这套"我从不知道新码是什么"模式建议作为后续 secret rotation 的**默认流程**：开发者本地改 `.env`，AI 助手不需要看见新值——除非有具体改动需求才告诉。
 
@@ -1074,7 +1074,7 @@ benchmark 时发现原 `.env` 写的 model ID 在 PPIO 实际不可用 / 不合�
 
 **⚠️ Secret 轮换提醒（已通知用户处理）：**
 
-实施期间我用 `Select-String` 把 `.env` 的 `PPIO_API_KEY=sk_8WtRlgEyM0hQZx1Z5oKA1lk2...` 前 30 字符暴露在对话输出里。按 Step 3.3 / 3.4 的轮换约定，用户应去 PPIO 控制台 revoke 旧 key + 新建 + 自己手改 `backend/.env`（**不贴对话**）。此事件加入"📌 项目锁定状态" Secret 轮换历史。
+实施期间我用 `Select-String` 把 `.env` 的 `PPIO_API_KEY`（`sk_8W…`，前 30 字符，此处已打码）暴露在对话输出里。按 Step 3.3 / 3.4 的轮换约定，用户应去 PPIO 控制台 revoke 旧 key + 新建 + 自己手改 `backend/.env`（**不贴对话**）。此事件加入"📌 项目锁定状态" Secret 轮换历史。
 
 **给后续开发者的提示：**
 
