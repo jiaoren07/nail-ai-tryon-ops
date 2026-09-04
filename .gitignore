@@ -39,3 +39,6 @@ Thumbs.db
 
 # Claude Code local tooling (skills 走全局 ~/.claude/，项目本地是冗余副本)
 .claude/
+
+# 设计期原型板截图，仅本地参考，不进版本库（12MB 二进制）
+原型1/
