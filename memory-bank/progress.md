@@ -2034,7 +2034,7 @@ benchmark 时发现原 `.env` 写的 model ID 在 PPIO 实际不可用 / 不合�
 
 **AI 服务层锁定（Phase 3 出来的决策）：**
 - **IMAGE_PROVIDER**：默认 `mock`；切 `seedream` 走 PPIO 的 Seedream 4.5，V1 短 prompt 锁定。Step 3.2 benchmark 烧 ¥0.945 排除了 4.0 over-darken / 5.0-lite 拒深色 / Qwen-Image-Edit 单图 / V2 加狠 prompt 无效——细节查 progress.md Step 3.2
-- **LLM 双档**：quick = `qwen/qwen3-next-80b-a3b-instruct`（80B MoE 激活 3B），strong = `deepseek/deepseek-v4-pro`（1M context + FC）；`TIMEOUT_SECONDS=60`（plan 写 30 不够 reasoning 模型偶发慢）
+- **LLM 双档**：quick = `qwen/qwen3-235b-a22b-instruct-2507`（2026-09-04 换代：PPIO 下架 qwen2.5 全系与 qwen3-next-80b，235b-a22b-instruct 为实测唯一低延迟非思考继任，1.7s 出短文案；glm-flash/minimax/kimi 等候选皆为思考模型不合 quick 语义），strong = `deepseek/deepseek-v4-pro`（1M context + FC）；`TIMEOUT_SECONDS=60`（plan 写 30 不够 reasoning 模型偶发慢）
 - **Email**：SMTPS via `smtplib.SMTP_SSL` 端口 465 + `asyncio.to_thread` 异步化；QQ `smtp.qq.com` 已实测通过；`wrap_html` 按 design-docu §7.7.4 包装（680px 宽 / Apple System / AI 助手脚注）
 
 **演示数据状态（Phase 1 出来的决策）：**

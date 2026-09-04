@@ -16,8 +16,13 @@ class Settings(BaseSettings):
 
     PPIO_API_KEY: str = ""
     PPIO_BASE_URL: str = "https://api.ppio.com/openai"
-    LLM_QUICK_MODEL: str = "qwen/qwen2.5-7b-instruct"
-    LLM_STRONG_MODEL: str = "deepseek/deepseek-v3.1"
+    # Defaults re-verified 2026-09-04: PPIO delisted the qwen2.5 family and
+    # qwen3-next-80b; 235b-a22b-instruct is the non-thinking successor
+    # (1.7s short-copy latency, finish=stop). Thinking-model candidates
+    # (glm-flash/minimax/kimi) burn max_tokens on reasoning — unusable for
+    # the quick tier.
+    LLM_QUICK_MODEL: str = "qwen/qwen3-235b-a22b-instruct-2507"
+    LLM_STRONG_MODEL: str = "deepseek/deepseek-v4-pro"
 
     SMTP_HOST: str = ""
     SMTP_PORT: int = 465
