@@ -215,7 +215,10 @@ _FALLBACK_TAIL_BY_TONE: dict[tuple[str, str], str] = {
     ("male", "cool"): "深邃有型",
     ("male", "neutral"): "低调耐看",
 }
-_REASON_LLM_TIMEOUT = 4.5  # single batched LLM call — well within 6s budget
+# Sized for the 2026-09 quick model (qwen3-235b-a22b-instruct: 9 reasons in
+# ~9s measured). The old 4.5s budget fit qwen3-next-80b but silently starved
+# the replacement into template fallback on every request.
+_REASON_LLM_TIMEOUT = 15
 
 
 def _user_summary(gender: str, hand_features: dict) -> str:
@@ -329,7 +332,9 @@ async def _gen_batch_reasons(
             for r, item in zip(parsed, items)
         ]
     except Exception as e:
-        _log.info("recommend: batch LLM fell back: %s", e)
+        # WARNING, not info: silent template degradation hid a 100%-fallback
+        # regression for days after a model swap. Degradation must be loud.
+        _log.warning("recommend: batch LLM fell back: %s", e)
         return [_fallback_reason(item, gender) for item in items]
 
 
