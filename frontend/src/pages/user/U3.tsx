@@ -2,6 +2,7 @@ import { App as AntApp, Segmented, Spin } from "antd";
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import api from "../../api/client";
+import { absUrl } from "../../utils/url";
 import { useUser } from "../../store/useUser";
 
 /**
@@ -365,7 +366,7 @@ interface BrowseCardProps {
 function BrowseCard({ item, selected, trying, disabled, onToggleCompare, onTry }: BrowseCardProps) {
   const coverUrl = item.cover_url.startsWith("http")
     ? item.cover_url
-    : `http://localhost:8000${item.cover_url}`;
+    : absUrl(item.cover_url);
   return (
     <div className={`group bg-card rounded-2xl border overflow-hidden transition shadow-sm hover:shadow-md ${
       selected ? "border-brand ring-2 ring-brand-light" : "border-line"

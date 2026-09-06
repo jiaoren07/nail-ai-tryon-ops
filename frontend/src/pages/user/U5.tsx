@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import ReactCompareImage from "react-compare-image";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import api from "../../api/client";
+import { absUrl } from "../../utils/url";
 import { useUser } from "../../store/useUser";
 
 /**
@@ -38,11 +39,6 @@ interface TryonDetail {
     color_tone: string;
     length_pref: string;
   };
-}
-
-function absUrl(u: string | null | undefined): string {
-  if (!u) return "";
-  return u.startsWith("http") ? u : `http://localhost:8000${u}`;
 }
 
 export default function U5() {

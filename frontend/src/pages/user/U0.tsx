@@ -1,6 +1,7 @@
 import { Link, useNavigate } from "react-router-dom";
 import { type Gender } from "../../store/UserContext";
 import { useUser } from "../../store/useUser";
+import { absUrl } from "../../utils/url";
 
 /**
  * U0 性别选择页（design-docu §6.1, plan §5.3, 原型 Board 1 第 1 屏）.
@@ -13,8 +14,8 @@ export default function U0() {
   const { setUserGender, userGender } = useUser();
   const navigate = useNavigate();
 
-  const HERO_FEMALE = "http://localhost:8000/static/styles/f_01_enh.png";
-  const HERO_MALE = "http://localhost:8000/static/styles/m_01.jpg";
+  const HERO_FEMALE = absUrl("/static/styles/f_01_enh.png");
+  const HERO_MALE = absUrl("/static/styles/m_01.jpg");
 
   const choose = (g: Gender) => {
     setUserGender(g);

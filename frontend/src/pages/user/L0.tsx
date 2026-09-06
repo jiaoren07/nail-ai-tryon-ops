@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
 import { useUser } from "../../store/useUser";
+import { absUrl } from "../../utils/url";
 
 /**
  * L0 双端入口（design-docu §6.0, 原型 Board 0）.
@@ -22,7 +23,7 @@ export default function L0() {
   // and userId is in sessionStorage before the user clicks either CTA.
   useUser();
 
-  const HERO_USER = "http://localhost:8000/static/styles/f_05_enh.png";
+  const HERO_USER = absUrl("/static/styles/f_05_enh.png");
 
   return (
     <div className="min-h-screen flex flex-col bg-page">

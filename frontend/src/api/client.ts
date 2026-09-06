@@ -1,5 +1,6 @@
 import axios, { type InternalAxiosRequestConfig } from "axios";
 import { message } from "antd";
+import { API_BASE } from "../utils/url";
 
 // Allow callers (e.g. Step 5.4 U1 upload page) to suppress the global
 // error toast when they want to surface a friendlier page-local message
@@ -11,7 +12,7 @@ declare module "axios" {
 }
 
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_BASE ?? "http://localhost:8000",
+  baseURL: API_BASE,
   timeout: 30_000,
 });
 

@@ -46,6 +46,22 @@ async def _run_weekly_report() -> None:
     await generate_and_dispatch_report("weekly", "scheduled")
 
 
+async def _run_daily_reseed() -> None:
+    """Batch G: nightly demo self-healing (public deployment). Runs the
+    idempotent seed pipeline in a subprocess so visitor-made mutations
+    (offlined styles, reordered ranks) reset and rolling time windows
+    re-anchor to the new day. Reports/notifications survive by design."""
+    import asyncio
+    import sys
+
+    proc = await asyncio.create_subprocess_exec(
+        sys.executable, "-X", "utf8", str(BACKEND_ROOT / "scripts" / "seed_all.py"),
+        cwd=str(BACKEND_ROOT),
+    )
+    code = await proc.wait()
+    _log.warning("daily reseed finished with exit code %s", code)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
@@ -62,6 +78,13 @@ async def lifespan(app: FastAPI):
             id="weekly_report",
             misfire_grace_time=_MISFIRE_GRACE_SECONDS,
         )
+        if settings.DAILY_RESEED:
+            scheduler.add_job(
+                _run_daily_reseed,
+                CronTrigger(hour=4, minute=30, timezone="Asia/Shanghai"),
+                id="daily_reseed",
+                misfire_grace_time=_MISFIRE_GRACE_SECONDS,
+            )
         scheduler.start()
         _log.info(
             "Scheduler started (Asia/Shanghai): %s",
@@ -127,3 +150,29 @@ def health() -> dict:
             "SCHEDULER_ENABLED": settings.SCHEDULER_ENABLED,
         },
     })
+
+
+# ===== Batch G: single-origin frontend serving (deployment mode) =====
+# When frontend/dist exists (`npm run build`), the backend serves the SPA
+# itself: one origin, no CORS, one port to expose publicly. The Vite dev
+# server on :5173 keeps working unchanged for development.
+FRONTEND_DIST = BACKEND_ROOT.parent / "frontend" / "dist"
+
+if FRONTEND_DIST.exists():
+    from fastapi.responses import FileResponse
+
+    app.mount(
+        "/assets",
+        StaticFiles(directory=str(FRONTEND_DIST / "assets")),
+        name="fe-assets",
+    )
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    async def spa_fallback(full_path: str):
+        """Serve index.html for every non-API, non-static path so React
+        Router deep links (/ops/overview, /result/123, ...) survive
+        refresh. Registered LAST — API routes and /static win first."""
+        candidate = FRONTEND_DIST / full_path
+        if full_path and candidate.is_file():
+            return FileResponse(candidate)
+        return FileResponse(FRONTEND_DIST / "index.html")

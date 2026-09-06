@@ -2,6 +2,7 @@ import { App as AntApp, Spin } from "antd";
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import api from "../../api/client";
+import { absUrl } from "../../utils/url";
 import { useUser } from "../../store/useUser";
 
 /**
@@ -288,12 +289,12 @@ function CompareCard({
   const coverUrl = meta?.cover_url?.startsWith("http")
     ? meta.cover_url
     : meta?.cover_url
-    ? `http://localhost:8000${meta.cover_url}`
+    ? absUrl(meta.cover_url)
     : "";
   const fullResultUrl = resultUrl?.startsWith("http")
     ? resultUrl
     : resultUrl
-    ? `http://localhost:8000${resultUrl}`
+    ? absUrl(resultUrl)
     : "";
 
   return (

@@ -2,6 +2,7 @@ import { App as AntApp, Checkbox, Spin } from "antd";
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import api from "../../api/client";
+import { absUrl } from "../../utils/url";
 import { useUser } from "../../store/useUser";
 
 /**
@@ -246,7 +247,7 @@ interface CardProps {
 function Card({ item, selected, trying, disabled, onToggleCompare, onTry }: CardProps) {
   const coverUrl = item.cover_url.startsWith("http")
     ? item.cover_url
-    : `http://localhost:8000${item.cover_url}`;
+    : absUrl(item.cover_url);
 
   return (
     <div className={`group bg-card rounded-3xl border overflow-hidden transition shadow-sm hover:shadow-lg ${
