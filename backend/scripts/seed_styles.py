@@ -1,9 +1,9 @@
 """Seed script: import 40 styles into DB + copy cover images + 17 hand samples.
 
-Sources (external dataset, not in repo):
-- d:\\美团AI HACKATHON\\dataset\\styles\\tags_qwen.json   (25 female, key=f_NN_enh.png)
-- d:\\美团AI HACKATHON\\dataset\\styles\\male\\tags_qwen.json  (15 male, key=m_NN.jpg)
-- d:\\美团AI HACKATHON\\dataset\\hands\\01.png ~ 17.png  (17 sample hands)
+Sources (shipped in-repo under assets/dataset/):
+- assets/dataset/styles/tags_qwen.json        (25 female, key=f_NN_enh.png)
+- assets/dataset/styles/male/tags_qwen.json   (15 male, key=m_NN.jpg)
+- assets/dataset/hands/01.png ~ 17.png        (17 sample hands)
 
 Idempotent: DELETE FROM styles then INSERT; static files overwritten.
 
@@ -31,7 +31,10 @@ from sqlalchemy.ext.asyncio import AsyncSession  # noqa: E402
 from app.db import engine  # noqa: E402
 from app.models import Style  # noqa: E402
 
-DATASET_DIR = Path(r"d:\美团AI HACKATHON\dataset")
+# Seed assets ship WITH the repo (assets/dataset/) since 2026-09 so any
+# clone can seed a fully-imaged product. The original external contest
+# folder is no longer required at runtime.
+DATASET_DIR = BACKEND_ROOT.parent / "assets" / "dataset"
 FEMALE_DIR = DATASET_DIR / "styles"
 MALE_DIR = DATASET_DIR / "styles" / "male"
 HANDS_DIR = DATASET_DIR / "hands"

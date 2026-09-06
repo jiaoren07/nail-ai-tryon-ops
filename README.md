@@ -80,7 +80,7 @@ React 18 + Vite + TypeScript + antd + Tailwind + ECharts ｜ FastAPI + SQLAlchem
 # 0. 配置（首次）：backend/ 下复制 .env.example 为 .env，填入 PPIO_API_KEY
 #    （SMTP 五项可留空：报告仍生成，仅邮件标记失败；IMAGE_PROVIDER=mock 为默认安全网）
 
-# 1. 初始化数据（可重复执行；隔天演示前请重跑以刷新时间窗口）
+# 1. 初始化数据（演示图片随仓库自带，无需额外下载；可重复执行，隔天演示前请重跑以刷新时间窗口）
 cd backend
 python -m venv .venv && .venv\Scripts\pip install -r requirements.txt   # 首次
 .venv\Scripts\python.exe -X utf8 scripts\seed_all.py
@@ -96,4 +96,4 @@ cd ../frontend && npm install && npm run dev
 
 ## 数据来源声明
 
-款式图与手模样本来自美团 AI 黑客松命题三提供的比赛数据集（已脱敏），另含少量自行补充的男士款式样本，仅用于本 demo 的功能演示。`data-prep/` 为一次性数据准备脚本；`Meijia/` 为已弃用的早期原型，均非产品代码。
+演示图片（`assets/dataset/`）随仓库分发：款式图与手模样本来自美团 AI 黑客松命题三提供的比赛数据集（已脱敏），另含少量自行补充的男士款式样本，仅用于本 demo 的非商业功能演示。如任何图片涉及您的权利，请提 issue 联系，将立即移除。`data-prep/` 为一次性数据准备脚本；`Meijia/` 为已弃用的早期原型，均非产品代码。
