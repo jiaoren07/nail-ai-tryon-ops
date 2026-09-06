@@ -216,13 +216,54 @@ class SeedreamProvider(ImageGenProvider):
             return f"/static/cache/{out.name}"
 
 
+class QuotaGuardedSeedream(ImageGenProvider):
+    """Batch G: daily spend cap for public deployments.
+
+    Counts real Seedream generations per Beijing calendar day; past
+    settings.SEEDREAM_DAILY_QUOTA the call silently degrades to
+    MockProvider (recorded as a degradation event) so a visitor spike
+    cannot drain the PPIO wallet. In-memory counter — resets on restart,
+    which only ever errs on the generous side.
+    """
+
+    def __init__(self) -> None:
+        self._real = SeedreamProvider()
+        self._mock = MockProvider()
+        self._day = ""
+        self._used = 0
+
+    async def generate(self, user_id, style_id, hand_image_bytes, prompt_extra=None) -> str:
+        from datetime import datetime, timedelta, timezone
+
+        today = datetime.now(timezone(timedelta(hours=8))).date().isoformat()
+        if today != self._day:
+            self._day, self._used = today, 0
+        if self._used >= settings.SEEDREAM_DAILY_QUOTA:
+            from app.services import health_stats
+
+            health_stats.record_degradation(
+                "image_gen_quota",
+                f"daily seedream quota {settings.SEEDREAM_DAILY_QUOTA} exhausted, serving mock",
+            )
+            return await self._mock.generate(user_id, style_id, hand_image_bytes, prompt_extra)
+        self._used += 1
+        return await self._real.generate(user_id, style_id, hand_image_bytes, prompt_extra)
+
+
+_seedream_guarded: QuotaGuardedSeedream | None = None
+
+
 def get_image_provider() -> ImageGenProvider:
     """Factory: pick provider per settings.IMAGE_PROVIDER ('mock' | 'seedream')."""
     name = settings.IMAGE_PROVIDER.lower().strip()
     if name == "mock":
         return MockProvider()
     if name == "seedream":
-        return SeedreamProvider()
+        # Singleton so the daily quota counter survives across requests.
+        global _seedream_guarded
+        if _seedream_guarded is None:
+            _seedream_guarded = QuotaGuardedSeedream()
+        return _seedream_guarded
     raise ImageGenError(
         f"unknown IMAGE_PROVIDER: {name!r}; valid values: mock, seedream"
     )

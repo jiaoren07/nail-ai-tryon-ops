@@ -92,6 +92,7 @@ const SERVICE_LABEL: Record<string, string> = {
 const DEGRADATION_LABEL: Record<string, string> = {
   recommend_reasons: "推荐理由 → 模板降级",
   ops_chat: "AI 助手 → 数据摘要降级",
+  image_gen_quota: "生图额度耗尽 → Mock 降级",
 };
 
 function formatUptime(seconds: number): string {

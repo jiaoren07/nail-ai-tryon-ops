@@ -33,5 +33,15 @@ class Settings(BaseSettings):
 
     SCHEDULER_ENABLED: bool = True
 
+    # === Batch G: public-deployment guards ===
+    # Nightly self-healing reseed (04:30 Asia/Shanghai): restores demo data
+    # after strangers play with ops actions, and re-anchors time windows.
+    # Keep false for local development (would wipe your manual test data).
+    DAILY_RESEED: bool = False
+    # Max REAL Seedream generations per calendar day when
+    # IMAGE_PROVIDER=seedream; beyond it, calls fall back to MockProvider
+    # so a public visitor spike cannot drain the PPIO wallet.
+    SEEDREAM_DAILY_QUOTA: int = 30
+
 
 settings = Settings()
