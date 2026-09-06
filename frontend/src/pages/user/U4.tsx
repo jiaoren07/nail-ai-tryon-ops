@@ -360,7 +360,17 @@ function CompareCard({
       {/* Footer */}
       <div className="px-4 py-3 flex items-center justify-between border-t border-line bg-card">
         <span className="text-xs text-ink-muted">
-          {ok && elapsedMs !== null ? `${elapsedMs}ms 完成` : ""}
+          {/* Real generation (seedream_*) shows its honest latency; mock
+              results are cover copies — advertise "快速预览" instead of a
+              milliseconds figure that would out itself as fake. */}
+          {ok &&
+            (resultUrl?.split("/").pop()?.startsWith("seedream_") ? (
+              elapsedMs !== null ? `${(elapsedMs / 1000).toFixed(1)}s AI 生成` : ""
+            ) : (
+              <span className="rounded-full bg-surface px-2 py-0.5 text-ink-secondary">
+                快速预览模式
+              </span>
+            ))}
         </span>
         <button
           type="button"

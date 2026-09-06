@@ -263,6 +263,11 @@ export default function U5() {
           </span>
           <span className="text-sm font-medium text-ink">试戴结果</span>
           <span className="text-xs text-ink-muted ml-2">#{detail.tryon_id}</span>
+          {!detail.result_url?.split("/").pop()?.startsWith("seedream_") && (
+            <span className="ml-2 rounded-full bg-surface px-2 py-0.5 text-xs text-ink-secondary">
+              快速预览模式
+            </span>
+          )}
         </div>
       </header>
 
