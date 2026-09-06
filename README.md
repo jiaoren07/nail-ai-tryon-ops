@@ -43,17 +43,19 @@ flowchart LR
 | 用户端 | 手图上传 | 样例图/自拍上传，肤色与手型分析 |
 | | 智能推荐 | 性别硬过滤 + 肤色 35% / 手型 30% / 热度 20% / 多样性 15% 打分，LLM 批量生成每款推荐理由 |
 | | AI 试戴 | Seedream 4.5 真实图像合成（手图+款式图双条件）；MockProvider 永久兜底 |
-| | 多款对比 / 结果页 | 并行试戴、滑块对比原图、收藏（写入闭环） |
+| | 多款对比 / 结果页 | 并行试戴、滑块对比原图、收藏（写入闭环）；mock 模式明示「快速预览」不伪装耗时 |
+| | 我的试戴 | 个人试戴历史与收藏列表，点击回看任意一次结果 |
 | 运营端 | O1 实时看板 | 4 KPI 环比 + 7 日趋势 + 标签分布 + 24h 热力，10s 自动刷新 |
 | | O2 爆款识别 | 3 日增长 ≥50% 且 24h ≥50 次且收藏率 ≥20%，一键采纳建议 |
 | | O3 冷门预警 | 三规则任一命中即预警，按建议类型给真实动作按钮 |
 | | O5 AI 助手 | Function Calling：5 个工具查数据/执行动作，全程审计，429 时降级为数据摘要（永不空白） |
 | | O6 款式管理 | 全量上下架/排序，改动即时生效于用户端 |
 | | O7 报告订阅 | APScheduler 定时（每日 09:00 / 周一 09:00，北京时间）+ 手动生成，LLM 日报/周报 → 站内信铃铛 + HTML 邮件 |
+| | O7 服务健康 | 每个 AI/外部调用点的成功/失败计数与降级事件流水——降级必须可见，不许安静 |
 
 ## 技术栈
 
-React 18 + Vite + TypeScript + antd + Tailwind + ECharts ｜ FastAPI + SQLAlchemy(async) + SQLite + APScheduler ｜ LLM/VLM/图像生成统一走 PPIO（OpenAI 兼容 API）：`deepseek-v4-pro`（强推理/FC/报告）、`qwen3-next-80b`（轻量文案）、Seedream 4.5（试戴合成）。
+React 18 + Vite + TypeScript + antd + Tailwind + ECharts ｜ FastAPI + SQLAlchemy(async) + SQLite + APScheduler ｜ LLM/VLM/图像生成统一走 PPIO（OpenAI 兼容 API）：`deepseek-v4-pro`（强推理/FC/报告）、`qwen3-235b-a22b-instruct`（轻量文案）、Seedream 4.5（试戴合成）。
 
 ## 值得一读的技术决策
 
@@ -63,7 +65,8 @@ React 18 + Vite + TypeScript + antd + Tailwind + ECharts ｜ FastAPI + SQLAlchem
 | reasoning 模型日报稳定输出空白 | 诊断出思考 token 烧光预算（finish_reason=length，思考 3496 token 全花在自算环比）；根治 = **环比在代码层预计算**、模型只做文字组织 | progress.md Batch C |
 | 图像生成不可依赖外部 API 存活 | `ImageGenProvider` 抽象 + MockProvider 兜底；邮件等副作用服务同样自带隔离档（DNS 必败域名走真实失败路径） | design-docu §8 |
 | 定时任务时区 | 所有 CronTrigger 显式 `Asia/Shanghai`，UTC 主机不会晚 8 小时 | progress.md Batch C |
-| 演示数据可复现 | seed 严格幂等（固定随机种子），删库重建后全链路可用 | scripts/seed_all.py |
+| 演示数据可复现 | seed 严格幂等（固定随机种子），删库重建后全链路可用；热度分从种子行为量推导而非拍脑袋 | scripts/seed_all.py |
+| 降级不许安静 | 换模型后一个写死的超时曾让推荐理由 100% 静默回落模板、潜伏数日——修复后所有降级记入服务健康面板（O7）+ WARNING 日志 | services/health_stats.py |
 
 ## AI 协作开发过程
 
@@ -93,6 +96,12 @@ cd ../frontend && npm install && npm run dev
 ```
 
 打开 `http://localhost:5173`：`/` 为双端入口。AI 助手连续提问建议间隔 30 秒（API 限速，超限自动降级为数据摘要回复）。
+
+## Roadmap
+
+- **双模式试戴**：当前走生成式整图合成（Seedream 款式迁移）——选它是因为产品定义是"试戴目录里的这一款"（需要把具体款式的设计原样迁移）、且受"纯云 API、单一供应商"约束。行业主流的分割+上色路线（ModiFace 式实时 AR）在保真与速度上占优但表现不了复杂款式。成熟形态是按款式复杂度分流：纯色/简单款走分割上色实时预览，复杂款走生成式高保真——`ImageGenProvider` 抽象已为第三个实现留好位置。
+- **推荐理由异步化**：卡片先出、LLM 文案后到，消掉当前约 12s 的同步等待。
+- **antd v6 弃用 API 统一清理**（Tag bordered / Drawer width 等），还 console 一个干净的错误通道。
 
 ## 数据来源声明
 
