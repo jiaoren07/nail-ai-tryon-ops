@@ -4,6 +4,16 @@
 
 > 起点是美团 AI 黑客松命题三（美甲 AI 试戴与智能运营）的参赛 demo，现作为个人 AI 协作开发（vibecoding）项目持续维护。全部 55 个构建步骤由 AI agent 实现、人工分级验收，过程完整留痕（见[开发过程](#ai-协作开发过程)）。
 
+## 界面预览
+
+| 用户端 · 智能推荐（LLM 逐款理由） | 用户端 · 试戴结果滑块对比 |
+|---|---|
+| ![推荐页](docs/screenshots/u2_recommend.png) | ![结果页](docs/screenshots/u5_result.png) |
+
+| 运营端 · 实时看板 | 运营端 · AI 助手（Function Calling） |
+|---|---|
+| ![看板](docs/screenshots/o1_overview.png) | ![AI 助手](docs/screenshots/o5_assistant.png) |
+
 ## 核心：数据闭环
 
 产品的立身之本不是单个功能，而是这条**真实、同步**的环：
