@@ -54,11 +54,17 @@ export default function U1() {
     setUploading(true);
     try {
       // 3. Client-side compression to <=5MB before posting (plan §5.4).
-      const compressed = await imageCompression(file, {
-        maxSizeMB: 5,
-        maxWidthOrHeight: 2000,
-        useWebWorker: true,
-      });
+      // Batch G: files already under 2MB skip compression entirely — the
+      // iterative re-encode cost seconds on the sample-image path (all 17
+      // samples are <2MB) while phone photos (5-10MB) still get compressed.
+      const compressed =
+        file.size < 2 * 1024 * 1024
+          ? file
+          : await imageCompression(file, {
+              maxSizeMB: 5,
+              maxWidthOrHeight: 2000,
+              useWebWorker: true,
+            });
       // 4. Multipart POST. suppressToast keeps the global interceptor
       //    quiet so we can show our own friendlier Chinese message.
       const fd = new FormData();
