@@ -1,6 +1,5 @@
 import { App as AntApp } from "antd";
-import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
-import Placeholder from "./components/Placeholder";
+import { BrowserRouter, Link, Navigate, Route, Routes } from "react-router-dom";
 import O1Overview from "./pages/ops/O1Overview";
 import O2Trending from "./pages/ops/O2Trending";
 import O3Cold from "./pages/ops/O3Cold";
@@ -16,6 +15,7 @@ import U2 from "./pages/user/U2";
 import U3 from "./pages/user/U3";
 import U4 from "./pages/user/U4";
 import U5 from "./pages/user/U5";
+import U6 from "./pages/user/U6";
 import { UserProvider } from "./store/UserContext";
 
 /**
@@ -37,7 +37,7 @@ export default function App() {
             <Route path="/browse" element={<U3 />} />
             <Route path="/compare" element={<U4 />} />
             <Route path="/result/:id" element={<U5 />} />
-            <Route path="/history" element={<Placeholder code="U6" title="试戴历史" />} />
+            <Route path="/history" element={<U6 />} />
             <Route path="/ops" element={<OpsLayout />}>
               <Route index element={<Navigate to="overview" replace />} />
               <Route
@@ -54,9 +54,24 @@ export default function App() {
               <Route path="setting" element={<O7Setting />} />
               <Route path="reports/:id" element={<RDetail />} />
             </Route>
+            {/* Batch E: clean public 404 (the old dev Placeholder exposed a
+                debug bar with route navigation on any bad URL) */}
             <Route
               path="*"
-              element={<Placeholder code="404" title="未匹配路径" hint="检查 App.tsx 路由表" />}
+              element={
+                <main className="flex min-h-screen items-center justify-center bg-page">
+                  <div className="rounded-3xl border border-line bg-card px-10 py-12 text-center">
+                    <div className="text-5xl font-bold text-ink">404</div>
+                    <p className="mt-2 text-sm text-ink-secondary">页面不存在或已下线</p>
+                    <Link
+                      to="/"
+                      className="mt-6 inline-block rounded-full bg-brand px-5 py-2 text-sm font-medium text-ink hover:bg-brand-hover"
+                    >
+                      回到首页
+                    </Link>
+                  </div>
+                </main>
+              }
             />
           </Routes>
         </BrowserRouter>
