@@ -387,7 +387,7 @@ function BrowseCard({ item, selected, trying, disabled, onToggleCompare, onTry }
         <button
           type="button"
           onClick={(e) => { e.stopPropagation(); onToggleCompare(); }}
-          className={`absolute bottom-2 left-2 px-2 py-0.5 rounded-full text-xs backdrop-blur transition ${
+          className={`absolute bottom-2 left-2 min-h-[36px] px-3 py-2 rounded-full text-xs backdrop-blur transition ${
             selected
               ? "bg-brand text-ink"
               : "bg-card/90 text-ink-secondary hover:bg-card"

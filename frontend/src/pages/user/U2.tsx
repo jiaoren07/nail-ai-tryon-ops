@@ -248,7 +248,15 @@ function Card({ item, selected, trying, disabled, onToggleCompare, onTry }: Card
             {trying ? <Spin size="small" /> : null}
             {trying ? "AI 生成中..." : "试这款"}
           </button>
-          <label className="inline-flex items-center gap-1.5 text-xs text-ink-secondary cursor-pointer select-none px-2">
+          {/* Batch E: 44px-class touch target (was a 16px-tall bare label
+              that mobile thumbs could not hit) */}
+          <label
+            className={`inline-flex min-h-[40px] items-center gap-1.5 rounded-full border px-3 text-xs cursor-pointer select-none transition ${
+              selected
+                ? "border-brand bg-brand-light text-ink"
+                : "border-line text-ink-secondary hover:border-brand"
+            }`}
+          >
             <Checkbox checked={selected} onChange={onToggleCompare} />
             <span>加入对比</span>
           </label>
