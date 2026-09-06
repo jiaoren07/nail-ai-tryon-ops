@@ -1,0 +1,433 @@
+{
+  "m_01.jpg": {
+    "status": "ok",
+    "parsed": {
+      "gender": "male",
+      "style_tags": [
+        "哑光",
+        "纯色",
+        "商务"
+      ],
+      "color_main": "#E8D5C9",
+      "color_tone": "warm",
+      "length_pref": "short",
+      "complexity": 1,
+      "occasion": [
+        "日常",
+        "通勤",
+        "商务"
+      ]
+    },
+    "raw": null,
+    "elapsed_s": 5.31,
+    "tokens": {
+      "in": 1393,
+      "out": 53,
+      "total": 1446
+    },
+    "attempt": 1
+  },
+  "m_02.jpg": {
+    "status": "ok",
+    "parsed": {
+      "gender": "male",
+      "style_tags": [
+        "哑光",
+        "纯色",
+        "透明",
+        "商务"
+      ],
+      "color_main": "#E8D5D5",
+      "color_tone": "neutral",
+      "length_pref": "short",
+      "complexity": 2,
+      "occasion": [
+        "日常",
+        "通勤",
+        "商务"
+      ]
+    },
+    "raw": null,
+    "elapsed_s": 21.78,
+    "tokens": {
+      "in": 1853,
+      "out": 55,
+      "total": 1908
+    },
+    "attempt": 1
+  },
+  "m_03.jpg": {
+    "status": "ok",
+    "parsed": {
+      "gender": "male",
+      "style_tags": [
+        "哑光",
+        "纯色",
+        "商务"
+      ],
+      "color_main": "#F5E6E6",
+      "color_tone": "warm",
+      "length_pref": "short",
+      "complexity": 1,
+      "occasion": [
+        "日常",
+        "通勤",
+        "商务"
+      ]
+    },
+    "raw": null,
+    "elapsed_s": 1.38,
+    "tokens": {
+      "in": 1933,
+      "out": 53,
+      "total": 1986
+    },
+    "attempt": 1
+  },
+  "m_04.jpg": {
+    "status": "ok",
+    "parsed": {
+      "gender": "male",
+      "style_tags": [
+        "哑光",
+        "纯色",
+        "个性",
+        "镶钻"
+      ],
+      "color_main": "#F5E6E0",
+      "color_tone": "neutral",
+      "length_pref": "short",
+      "complexity": 3,
+      "occasion": [
+        "日常",
+        "社交",
+        "个性表达"
+      ]
+    },
+    "raw": null,
+    "elapsed_s": 1.18,
+    "tokens": {
+      "in": 1423,
+      "out": 56,
+      "total": 1479
+    },
+    "attempt": 1
+  },
+  "m_05.jpg": {
+    "status": "ok",
+    "parsed": {
+      "gender": "male",
+      "style_tags": [
+        "极简",
+        "纯色",
+        "个性",
+        "渐变"
+      ],
+      "color_main": "#E8D5C7",
+      "color_tone": "neutral",
+      "length_pref": "short",
+      "complexity": 3,
+      "occasion": [
+        "日常",
+        "社交",
+        "个性表达"
+      ]
+    },
+    "raw": null,
+    "elapsed_s": 1.67,
+    "tokens": {
+      "in": 1513,
+      "out": 56,
+      "total": 1569
+    },
+    "attempt": 1
+  },
+  "m_06.jpg": {
+    "status": "ok",
+    "parsed": {
+      "gender": "male",
+      "style_tags": [
+        "哑光",
+        "纯色",
+        "深色系",
+        "商务"
+      ],
+      "color_main": "#5A4A42",
+      "color_tone": "cool",
+      "length_pref": "short",
+      "complexity": 2,
+      "occasion": [
+        "日常",
+        "通勤",
+        "商务"
+      ]
+    },
+    "raw": null,
+    "elapsed_s": 3.82,
+    "tokens": {
+      "in": 2053,
+      "out": 57,
+      "total": 2110
+    },
+    "attempt": 3
+  },
+  "m_07.jpg": {
+    "status": "ok",
+    "parsed": {
+      "gender": "male",
+      "style_tags": [
+        "个性",
+        "酷炫",
+        "几何",
+        "跳色"
+      ],
+      "color_main": "#FFFFFF",
+      "color_tone": "neutral",
+      "length_pref": "medium",
+      "complexity": 4,
+      "occasion": [
+        "派对",
+        "社交",
+        "个性表达"
+      ]
+    },
+    "raw": null,
+    "elapsed_s": 2.08,
+    "tokens": {
+      "in": 2323,
+      "out": 51,
+      "total": 2374
+    },
+    "attempt": 1
+  },
+  "m_08.jpg": {
+    "status": "ok",
+    "parsed": {
+      "gender": "male",
+      "style_tags": [
+        "个性",
+        "几何",
+        "闪光"
+      ],
+      "color_main": "#E0E0E0",
+      "color_tone": "neutral",
+      "length_pref": "medium",
+      "complexity": 3,
+      "occasion": [
+        "派对",
+        "社交",
+        "个性表达"
+      ]
+    },
+    "raw": null,
+    "elapsed_s": 2.69,
+    "tokens": {
+      "in": 1633,
+      "out": 52,
+      "total": 1685
+    },
+    "attempt": 1
+  },
+  "m_09.jpg": {
+    "status": "ok",
+    "parsed": {
+      "gender": "male",
+      "style_tags": [
+        "哑光",
+        "纯色",
+        "个性",
+        "几何"
+      ],
+      "color_main": "#E8D0D0",
+      "color_tone": "neutral",
+      "length_pref": "short",
+      "complexity": 3,
+      "occasion": [
+        "日常",
+        "社交",
+        "个性表达"
+      ]
+    },
+    "raw": null,
+    "elapsed_s": 1.57,
+    "tokens": {
+      "in": 2213,
+      "out": 55,
+      "total": 2268
+    },
+    "attempt": 1
+  },
+  "m_10.jpg": {
+    "status": "ok",
+    "parsed": {
+      "gender": "male",
+      "style_tags": [
+        "个性",
+        "酷炫",
+        "朋克",
+        "镶钻"
+      ],
+      "color_main": "#000000",
+      "color_tone": "cool",
+      "length_pref": "short",
+      "complexity": 4,
+      "occasion": [
+        "派对",
+        "社交",
+        "个性表达"
+      ]
+    },
+    "raw": null,
+    "elapsed_s": 12.31,
+    "tokens": {
+      "in": 1813,
+      "out": 57,
+      "total": 1870
+    },
+    "attempt": 1
+  },
+  "m_11.jpg": {
+    "status": "ok",
+    "parsed": {
+      "gender": "male",
+      "style_tags": [
+        "个性",
+        "酷炫",
+        "几何",
+        "闪光"
+      ],
+      "color_main": "#E0B0C7",
+      "color_tone": "cool",
+      "length_pref": "medium",
+      "complexity": 4,
+      "occasion": [
+        "派对",
+        "社交",
+        "个性表达"
+      ]
+    },
+    "raw": null,
+    "elapsed_s": 3.16,
+    "tokens": {
+      "in": 1573,
+      "out": 55,
+      "total": 1628
+    },
+    "attempt": 3
+  },
+  "m_12.jpg": {
+    "status": "ok",
+    "parsed": {
+      "gender": "male",
+      "style_tags": [
+        "哑光",
+        "深色系",
+        "个性",
+        "闪光"
+      ],
+      "color_main": "#1A1A1A",
+      "color_tone": "cool",
+      "length_pref": "medium",
+      "complexity": 3,
+      "occasion": [
+        "派对",
+        "社交",
+        "个性表达"
+      ]
+    },
+    "raw": null,
+    "elapsed_s": 1.7,
+    "tokens": {
+      "in": 2013,
+      "out": 57,
+      "total": 2070
+    },
+    "attempt": 1
+  },
+  "m_13.jpg": {
+    "status": "ok",
+    "parsed": {
+      "gender": "male",
+      "style_tags": [
+        "个性",
+        "酷炫",
+        "朋克"
+      ],
+      "color_main": "#1A1A1A",
+      "color_tone": "cool",
+      "length_pref": "short",
+      "complexity": 4,
+      "occasion": [
+        "派对",
+        "社交",
+        "个性表达"
+      ]
+    },
+    "raw": null,
+    "elapsed_s": 1.42,
+    "tokens": {
+      "in": 2253,
+      "out": 54,
+      "total": 2307
+    },
+    "attempt": 1
+  },
+  "m_14.jpg": {
+    "status": "ok",
+    "parsed": {
+      "gender": "male",
+      "style_tags": [
+        "个性",
+        "酷炫",
+        "几何",
+        "镶钻"
+      ],
+      "color_main": "#1A1A1A",
+      "color_tone": "cool",
+      "length_pref": "medium",
+      "complexity": 4,
+      "occasion": [
+        "派对",
+        "社交",
+        "个性表达"
+      ]
+    },
+    "raw": null,
+    "elapsed_s": 1.33,
+    "tokens": {
+      "in": 1693,
+      "out": 56,
+      "total": 1749
+    },
+    "attempt": 1
+  },
+  "m_15.jpg": {
+    "status": "ok",
+    "parsed": {
+      "gender": "male",
+      "style_tags": [
+        "深色系",
+        "个性",
+        "酷炫",
+        "几何"
+      ],
+      "color_main": "#1A1A1A",
+      "color_tone": "cool",
+      "length_pref": "medium",
+      "complexity": 4,
+      "occasion": [
+        "派对",
+        "社交",
+        "个性表达"
+      ]
+    },
+    "raw": null,
+    "elapsed_s": 1.4,
+    "tokens": {
+      "in": 2401,
+      "out": 57,
+      "total": 2458
+    },
+    "attempt": 1
+  }
+}

@@ -1,0 +1,643 @@
+{
+  "f_01_enh.png": {
+    "status": "ok",
+    "parsed": {
+      "gender": "female",
+      "style_tags": [
+        "纯色",
+        "极简"
+      ],
+      "color_main": "#F0E6D2",
+      "color_tone": "neutral",
+      "length_pref": "medium",
+      "complexity": 1,
+      "occasion": [
+        "日常",
+        "通勤"
+      ]
+    },
+    "raw": null,
+    "elapsed_s": 11.26,
+    "tokens": {
+      "in": 1599,
+      "out": 49,
+      "total": 1648
+    }
+  },
+  "f_02_enh.png": {
+    "status": "ok",
+    "parsed": {
+      "gender": "female",
+      "style_tags": [
+        "跳色",
+        "纯色"
+      ],
+      "color_main": "#6B8E23",
+      "color_tone": "neutral",
+      "length_pref": "medium",
+      "complexity": 2,
+      "occasion": [
+        "日常",
+        "通勤"
+      ]
+    },
+    "raw": null,
+    "elapsed_s": 11.58,
+    "tokens": {
+      "in": 1599,
+      "out": 49,
+      "total": 1648
+    }
+  },
+  "f_03_enh.png": {
+    "status": "ok",
+    "parsed": {
+      "gender": "female",
+      "style_tags": [
+        "复杂图案",
+        "跳色"
+      ],
+      "color_main": "#000000",
+      "color_tone": "neutral",
+      "length_pref": "medium",
+      "complexity": 4,
+      "occasion": [
+        "约会",
+        "派对"
+      ]
+    },
+    "raw": null,
+    "elapsed_s": 72.84,
+    "tokens": {
+      "in": 1599,
+      "out": 49,
+      "total": 1648
+    }
+  },
+  "f_04_enh.png": {
+    "status": "ok",
+    "parsed": {
+      "gender": "female",
+      "style_tags": [
+        "跳色",
+        "闪光"
+      ],
+      "color_main": "#D3D3D3",
+      "color_tone": "neutral",
+      "length_pref": "medium",
+      "complexity": 3,
+      "occasion": [
+        "日常",
+        "约会"
+      ]
+    },
+    "raw": null,
+    "elapsed_s": 11.73,
+    "tokens": {
+      "in": 1599,
+      "out": 47,
+      "total": 1646
+    }
+  },
+  "f_05_enh.png": {
+    "status": "ok",
+    "parsed": {
+      "gender": "female",
+      "style_tags": [
+        "跳色",
+        "复杂图案"
+      ],
+      "color_main": "#FFFFFF",
+      "color_tone": "neutral",
+      "length_pref": "short",
+      "complexity": 3,
+      "occasion": [
+        "日常",
+        "约会"
+      ]
+    },
+    "raw": null,
+    "elapsed_s": 72.76,
+    "tokens": {
+      "in": 1599,
+      "out": 43,
+      "total": 1642
+    }
+  },
+  "f_06_enh.png": {
+    "status": "ok",
+    "parsed": {
+      "gender": "female",
+      "style_tags": [
+        "法式",
+        "镶钻"
+      ],
+      "color_main": "#F0E6D2",
+      "color_tone": "neutral",
+      "length_pref": "long",
+      "complexity": 3,
+      "occasion": [
+        "约会",
+        "派对"
+      ]
+    },
+    "raw": null,
+    "elapsed_s": 72.09,
+    "tokens": {
+      "in": 1599,
+      "out": 49,
+      "total": 1648
+    },
+    "attempt": 1
+  },
+  "f_07_enh.png": {
+    "status": "ok",
+    "parsed": {
+      "gender": "female",
+      "style_tags": [
+        "渐变",
+        "闪光",
+        "复杂图案"
+      ],
+      "color_main": "#FFFFFF",
+      "color_tone": "neutral",
+      "length_pref": "long",
+      "complexity": 4,
+      "occasion": [
+        "约会",
+        "派对"
+      ]
+    },
+    "raw": null,
+    "elapsed_s": 70.48,
+    "tokens": {
+      "in": 1599,
+      "out": 46,
+      "total": 1645
+    }
+  },
+  "f_08_enh.png": {
+    "status": "ok",
+    "parsed": {
+      "gender": "female",
+      "style_tags": [
+        "渐变",
+        "镶钻",
+        "透明"
+      ],
+      "color_main": "#D8D8D8",
+      "color_tone": "neutral",
+      "length_pref": "long",
+      "complexity": 3,
+      "occasion": [
+        "约会",
+        "派对"
+      ]
+    },
+    "raw": null,
+    "elapsed_s": 71.89,
+    "tokens": {
+      "in": 1599,
+      "out": 51,
+      "total": 1650
+    }
+  },
+  "f_09_enh.png": {
+    "status": "ok",
+    "parsed": {
+      "gender": "female",
+      "style_tags": [
+        "跳色",
+        "镶钻",
+        "复杂图案"
+      ],
+      "color_main": "#000000",
+      "color_tone": "neutral",
+      "length_pref": "long",
+      "complexity": 4,
+      "occasion": [
+        "约会",
+        "派对"
+      ]
+    },
+    "raw": null,
+    "elapsed_s": 8.78,
+    "tokens": {
+      "in": 1599,
+      "out": 52,
+      "total": 1651
+    }
+  },
+  "f_10_enh.png": {
+    "status": "ok",
+    "parsed": {
+      "gender": "female",
+      "style_tags": [
+        "法式",
+        "渐变"
+      ],
+      "color_main": "#F5E6D3",
+      "color_tone": "warm",
+      "length_pref": "long",
+      "complexity": 3,
+      "occasion": [
+        "约会",
+        "派对"
+      ]
+    },
+    "raw": null,
+    "elapsed_s": 11.72,
+    "tokens": {
+      "in": 1599,
+      "out": 49,
+      "total": 1648
+    },
+    "attempt": 1
+  },
+  "f_11_enh.png": {
+    "status": "ok",
+    "parsed": {
+      "gender": "female",
+      "style_tags": [
+        "透明",
+        "复杂图案"
+      ],
+      "color_main": "#FFFFFF",
+      "color_tone": "neutral",
+      "length_pref": "medium",
+      "complexity": 3,
+      "occasion": [
+        "约会",
+        "婚礼"
+      ]
+    },
+    "raw": null,
+    "elapsed_s": 9.34,
+    "tokens": {
+      "in": 1599,
+      "out": 42,
+      "total": 1641
+    }
+  },
+  "f_12_enh.png": {
+    "status": "ok",
+    "parsed": {
+      "gender": "female",
+      "style_tags": [
+        "法式",
+        "复杂图案"
+      ],
+      "color_main": "#F0E6D2",
+      "color_tone": "neutral",
+      "length_pref": "medium",
+      "complexity": 4,
+      "occasion": [
+        "约会",
+        "派对"
+      ]
+    },
+    "raw": null,
+    "elapsed_s": 7.3,
+    "tokens": {
+      "in": 1599,
+      "out": 49,
+      "total": 1648
+    }
+  },
+  "f_13_enh.png": {
+    "status": "ok",
+    "parsed": {
+      "gender": "female",
+      "style_tags": [
+        "法式",
+        "镶钻"
+      ],
+      "color_main": "#FFFFFF",
+      "color_tone": "neutral",
+      "length_pref": "medium",
+      "complexity": 3,
+      "occasion": [
+        "日常",
+        "约会"
+      ]
+    },
+    "raw": null,
+    "elapsed_s": 6.84,
+    "tokens": {
+      "in": 1599,
+      "out": 43,
+      "total": 1642
+    }
+  },
+  "f_14_enh.png": {
+    "status": "ok",
+    "parsed": {
+      "gender": "female",
+      "style_tags": [
+        "法式",
+        "渐变"
+      ],
+      "color_main": "#F0E6D2",
+      "color_tone": "neutral",
+      "length_pref": "long",
+      "complexity": 2,
+      "occasion": [
+        "日常",
+        "约会"
+      ]
+    },
+    "raw": null,
+    "elapsed_s": 10.02,
+    "tokens": {
+      "in": 1599,
+      "out": 48,
+      "total": 1647
+    },
+    "attempt": 1
+  },
+  "f_15_enh.png": {
+    "status": "ok",
+    "parsed": {
+      "gender": "female",
+      "style_tags": [
+        "复杂图案",
+        "跳色",
+        "几何"
+      ],
+      "color_main": "#FFC0CB",
+      "color_tone": "warm",
+      "length_pref": "medium",
+      "complexity": 4,
+      "occasion": [
+        "约会",
+        "派对"
+      ]
+    },
+    "raw": null,
+    "elapsed_s": 74.0,
+    "tokens": {
+      "in": 1599,
+      "out": 49,
+      "total": 1648
+    },
+    "attempt": 1
+  },
+  "f_16_enh.png": {
+    "status": "ok",
+    "parsed": {
+      "gender": "female",
+      "style_tags": [
+        "渐变",
+        "闪光",
+        "跳色"
+      ],
+      "color_main": "#FF69B4",
+      "color_tone": "warm",
+      "length_pref": "medium",
+      "complexity": 3,
+      "occasion": [
+        "约会",
+        "派对"
+      ]
+    },
+    "raw": null,
+    "elapsed_s": 11.32,
+    "tokens": {
+      "in": 1599,
+      "out": 50,
+      "total": 1649
+    },
+    "attempt": 1
+  },
+  "f_17_enh.png": {
+    "status": "ok",
+    "parsed": {
+      "gender": "female",
+      "style_tags": [
+        "镶钻",
+        "透明",
+        "跳色"
+      ],
+      "color_main": "#FFFFFF",
+      "color_tone": "neutral",
+      "length_pref": "medium",
+      "complexity": 3,
+      "occasion": [
+        "约会",
+        "派对"
+      ]
+    },
+    "raw": null,
+    "elapsed_s": 7.58,
+    "tokens": {
+      "in": 1599,
+      "out": 46,
+      "total": 1645
+    },
+    "attempt": 1
+  },
+  "f_18_enh.png": {
+    "status": "ok",
+    "parsed": {
+      "gender": "female",
+      "style_tags": [
+        "镶钻",
+        "跳色"
+      ],
+      "color_main": "#F0E6D2",
+      "color_tone": "neutral",
+      "length_pref": "medium",
+      "complexity": 4,
+      "occasion": [
+        "约会",
+        "派对"
+      ]
+    },
+    "raw": null,
+    "elapsed_s": 9.55,
+    "tokens": {
+      "in": 1599,
+      "out": 49,
+      "total": 1648
+    },
+    "attempt": 1
+  },
+  "f_19_enh.png": {
+    "status": "ok",
+    "parsed": {
+      "gender": "female",
+      "style_tags": [
+        "镶钻",
+        "闪光",
+        "透明"
+      ],
+      "color_main": "#F0E6D2",
+      "color_tone": "neutral",
+      "length_pref": "long",
+      "complexity": 4,
+      "occasion": [
+        "约会",
+        "派对"
+      ]
+    },
+    "raw": null,
+    "elapsed_s": 7.1,
+    "tokens": {
+      "in": 1599,
+      "out": 50,
+      "total": 1649
+    }
+  },
+  "f_20_enh.png": {
+    "status": "ok",
+    "parsed": {
+      "gender": "female",
+      "style_tags": [
+        "镶钻",
+        "闪光",
+        "透明"
+      ],
+      "color_main": "#FFFFFF",
+      "color_tone": "neutral",
+      "length_pref": "long",
+      "complexity": 4,
+      "occasion": [
+        "约会",
+        "派对"
+      ]
+    },
+    "raw": null,
+    "elapsed_s": 4.21,
+    "tokens": {
+      "in": 1599,
+      "out": 45,
+      "total": 1644
+    }
+  },
+  "f_21_enh.png": {
+    "status": "ok",
+    "parsed": {
+      "gender": "female",
+      "style_tags": [
+        "法式",
+        "镶钻",
+        "闪光"
+      ],
+      "color_main": "#F0E6D2",
+      "color_tone": "neutral",
+      "length_pref": "medium",
+      "complexity": 3,
+      "occasion": [
+        "日常",
+        "约会"
+      ]
+    },
+    "raw": null,
+    "elapsed_s": 6.61,
+    "tokens": {
+      "in": 1599,
+      "out": 50,
+      "total": 1649
+    }
+  },
+  "f_22_enh.png": {
+    "status": "ok",
+    "parsed": {
+      "gender": "female",
+      "style_tags": [
+        "闪光",
+        "纯色"
+      ],
+      "color_main": "#D2B48C",
+      "color_tone": "neutral",
+      "length_pref": "medium",
+      "complexity": 2,
+      "occasion": [
+        "约会",
+        "派对"
+      ]
+    },
+    "raw": null,
+    "elapsed_s": 7.88,
+    "tokens": {
+      "in": 1599,
+      "out": 48,
+      "total": 1647
+    }
+  },
+  "f_23_enh.png": {
+    "status": "ok",
+    "parsed": {
+      "gender": "female",
+      "style_tags": [
+        "法式",
+        "镶钻"
+      ],
+      "color_main": "#F0E6D2",
+      "color_tone": "neutral",
+      "length_pref": "medium",
+      "complexity": 3,
+      "occasion": [
+        "日常",
+        "约会"
+      ]
+    },
+    "raw": null,
+    "elapsed_s": 6.66,
+    "tokens": {
+      "in": 1599,
+      "out": 48,
+      "total": 1647
+    }
+  },
+  "f_24_enh.png": {
+    "status": "ok",
+    "parsed": {
+      "gender": "female",
+      "style_tags": [
+        "闪光",
+        "跳色"
+      ],
+      "color_main": "#808080",
+      "color_tone": "neutral",
+      "length_pref": "medium",
+      "complexity": 3,
+      "occasion": [
+        "约会",
+        "派对"
+      ]
+    },
+    "raw": null,
+    "elapsed_s": 7.06,
+    "tokens": {
+      "in": 1599,
+      "out": 48,
+      "total": 1647
+    }
+  },
+  "f_25_enh.png": {
+    "status": "ok",
+    "parsed": {
+      "gender": "female",
+      "style_tags": [
+        "法式",
+        "跳色"
+      ],
+      "color_main": "#FFC0CB",
+      "color_tone": "warm",
+      "length_pref": "medium",
+      "complexity": 3,
+      "occasion": [
+        "约会",
+        "派对"
+      ]
+    },
+    "raw": null,
+    "elapsed_s": 6.12,
+    "tokens": {
+      "in": 1599,
+      "out": 47,
+      "total": 1646
+    }
+  }
+}
