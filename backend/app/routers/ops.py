@@ -23,10 +23,11 @@ from sqlalchemy import select, text
 from sqlalchemy import update as sql_update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.db import get_db
 from app.models import Notification, OpsAction, Report, Style, StyleStats, Tryon
 from app.responses import ok
-from app.services import llm
+from app.services import health_stats, llm
 from app.services.assistant_tools import TOOL_SCHEMAS, dispatch
 from app.services.report import (
     ReportError,
@@ -122,11 +123,10 @@ async def overview(db: AsyncSession = Depends(get_db)):
         select(sqlf.count()).select_from(Style).where(Style.is_active == 1)
     )).scalar_one()
 
-    # KPI 4: new trending alerts (Step 6.2 owns the trending detection; here
-    # we just expose a sentinel 0 + None diff so the dashboard renders. The
-    # ops frontend Phase 7 will likely overlay /api/ops/trending count
-    # without re-deriving the rule.)
-    new_trending_alerts = 0
+    # KPI 4: live count from the same rule engine as GET /trending, so the
+    # O1 card and the O2 list can never contradict each other. (Replaced
+    # the Phase-6 sentinel 0 that shipped unfixed until the 2026-09 review.)
+    new_trending_alerts = len(await _trending_items(db))
 
     kpis = {
         "tryons_today": {
@@ -224,9 +224,9 @@ def _suggest_trending_action(growth: float, collect_rate: float, last_24h: int) 
     return "纳入候选池，持续观察"
 
 
-@router.get("/trending")
-async def trending(db: AsyncSession = Depends(get_db)):
-    """Plan §6.2 / design-docu §7.2: identify trending (emerging-hot) styles.
+async def _trending_items(db: AsyncSession) -> list[dict]:
+    """Core of GET /trending, shared with the overview KPI card so the
+    O1 「新增爆款预警」 number can never disagree with the O2 list.
 
     All three rules must hold:
       - recent 3d / previous 3d growth_rate >= 50%
@@ -289,7 +289,7 @@ async def trending(db: AsyncSession = Depends(get_db)):
         })
 
     if not hits:
-        return ok(data={"items": []})
+        return []
 
     # Sort by growth_rate desc (Inf naturally sorts to the top)
     hits.sort(key=lambda x: -x["growth_rate"])
@@ -349,7 +349,13 @@ async def trending(db: AsyncSession = Depends(get_db)):
             ),
         })
 
-    return ok(data={"items": items})
+    return items
+
+
+@router.get("/trending")
+async def trending(db: AsyncSession = Depends(get_db)):
+    """Plan §6.2 / design-docu §7.2: emerging-hot styles (rules in helper)."""
+    return ok(data={"items": await _trending_items(db)})
 
 
 # ===== Step 6.3: GET /api/ops/cold =====
@@ -803,7 +809,8 @@ async def ops_chat(body: ChatBody, db: AsyncSession = Depends(get_db)):
             # text-only call so the reply reflects gathered data.
             final = await llm.gen_text_with_tools(llm_messages, tools=[])
             reply = (final.content or "").strip()
-    except (llm.LLMError, llm.ConfigError):
+    except (llm.LLMError, llm.ConfigError) as e:
+        health_stats.record_degradation("ops_chat", str(e))
         reply = None  # degrade below; components (if any) still ship
 
     if not reply:
@@ -1002,6 +1009,30 @@ async def mark_notification_read(
         notification.read_at = datetime.now(timezone.utc)
         await db.commit()
     return ok(data={"id": notification_id, "is_read": True})
+
+
+# ===== Batch E: service health / degradation visibility =====
+
+@router.get("/health-stats")
+async def ops_health_stats():
+    """O7 账号工作台 service-health panel: uptime, per-service call
+    outcomes, recent degradation events, runtime config surface."""
+    data = health_stats.snapshot()
+    scheduler_running = False
+    try:
+        from app.main import scheduler  # lazy: avoids import cycle at load
+
+        scheduler_running = scheduler.running
+    except Exception:  # pragma: no cover — scheduler introspection only
+        pass
+    data.update({
+        "image_provider": settings.IMAGE_PROVIDER,
+        "scheduler_enabled": settings.SCHEDULER_ENABLED,
+        "scheduler_running": scheduler_running,
+        "llm_quick_model": settings.LLM_QUICK_MODEL,
+        "llm_strong_model": settings.LLM_STRONG_MODEL,
+    })
+    return ok(data=data)
 
 
 @router.post("/notifications/read-all")
