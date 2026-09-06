@@ -114,7 +114,7 @@ function TrendingList({ rows }: { rows: TrendingRow[] }) {
             <span className="ml-1 text-ink-muted">{row.style_id}</span>
           </span>
           <span className="ml-3 shrink-0">
-            <Tag color="volcano" bordered={false} className="mr-1">
+            <Tag color="volcano" variant="filled" className="mr-1">
               {row.growth_rate === null ? "首次爆发" : `+${Math.round(row.growth_rate * 100)}%`}
             </Tag>
             <span className="text-ink-secondary">24h {row.last_24h_tryons}</span>

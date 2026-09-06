@@ -236,7 +236,7 @@ export default function O3Cold() {
         key: "reason",
         width: 170,
         render: (_, item) => (
-          <Tag color="orange" bordered={false} className="whitespace-normal leading-5">
+          <Tag color="orange" variant="filled" className="whitespace-normal leading-5">
             {item.cold_reason}
           </Tag>
         ),
@@ -313,12 +313,12 @@ export default function O3Cold() {
       <Drawer
         open={active !== null}
         onClose={() => setActive(null)}
-        width={520}
+        size={520}
         title={
           active ? (
             <div className="flex items-center gap-2">
               <span>{active.name}</span>
-              <Tag color="orange" bordered={false}>
+              <Tag color="orange" variant="filled">
                 冷门预警
               </Tag>
             </div>

@@ -86,7 +86,7 @@ export default function OpsLayout() {
           </div>
 
           <div className="flex items-center gap-4">
-            <Tag color="purple" bordered={false}>
+            <Tag color="purple" variant="filled">
               AI 驱动
             </Tag>
             <NotificationBell />
@@ -111,12 +111,12 @@ export default function OpsLayout() {
         title={
           <span className="flex items-center gap-2">
             AI 运营助手
-            <Tag color="purple" bordered={false}>
+            <Tag color="purple" variant="filled">
               Function Calling
             </Tag>
           </span>
         }
-        width={480}
+        size={480}
         open={chatOpen}
         onClose={() => setChatOpen(false)}
         styles={{ body: { display: "flex", flexDirection: "column", padding: 16 } }}

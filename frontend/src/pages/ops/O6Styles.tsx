@@ -240,7 +240,7 @@ export default function O6Styles() {
         render: (_, item) => {
           const meta = GENDER_TAG[item.gender] ?? GENDER_TAG.both;
           return (
-            <Tag color={meta.color} bordered={false}>
+            <Tag color={meta.color} variant="filled">
               {meta.label}
             </Tag>
           );
@@ -253,13 +253,13 @@ export default function O6Styles() {
         render: (_, item) => (
           <div className="flex flex-wrap gap-1">
             {item.style_tags.slice(0, 3).map((tag) => (
-              <Tag key={tag} bordered={false} className="mr-0">
+              <Tag key={tag} variant="filled" className="mr-0">
                 {tag}
               </Tag>
             ))}
             {item.style_tags.length > 3 && (
               <Tooltip title={item.style_tags.slice(3).join(" / ")}>
-                <Tag bordered={false} className="mr-0">
+                <Tag variant="filled" className="mr-0">
                   +{item.style_tags.length - 3}
                 </Tag>
               </Tooltip>

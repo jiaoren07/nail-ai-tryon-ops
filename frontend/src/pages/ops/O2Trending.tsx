@@ -335,12 +335,12 @@ export default function O2Trending() {
       <Drawer
         open={active !== null}
         onClose={() => setActive(null)}
-        width={520}
+        size={520}
         title={
           active ? (
             <div className="flex items-center gap-2">
               <span>{active.name}</span>
-              <Tag color="volcano" bordered={false}>
+              <Tag color="volcano" variant="filled">
                 爆款候选
               </Tag>
             </div>

@@ -74,7 +74,7 @@ function KpiCard({
             value={value}
             precision={precision}
             suffix={suffix}
-            valueStyle={{ fontSize: 30, fontWeight: 650, color: "inherit" }}
+            styles={{ content: { fontSize: 30, fontWeight: 650, color: "inherit" } }}
           />
         </div>
         <div className="w-11 h-11 shrink-0 rounded-xl bg-brand-light text-ink flex items-center justify-center text-lg">

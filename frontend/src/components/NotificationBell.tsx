@@ -138,7 +138,7 @@ export default function NotificationBell() {
 
       <Drawer
         title="通知"
-        width={400}
+        size={400}
         open={open}
         onClose={() => setOpen(false)}
         extra={
@@ -169,7 +169,7 @@ export default function NotificationBell() {
                     )}
                     {item.title}
                   </span>
-                  <Tag bordered={false} className="mr-0 shrink-0">
+                  <Tag variant="filled" className="mr-0 shrink-0">
                     {item.type === "report" ? "报告" : item.type}
                   </Tag>
                 </div>

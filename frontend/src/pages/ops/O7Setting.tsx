@@ -168,7 +168,7 @@ function AccountHealthSection() {
           <div className="text-xs text-ink-muted">图像生成模式</div>
           <div className="mt-0.5">
             <Tag
-              bordered={false}
+              variant="filled"
               color={stats.image_provider === "seedream" ? "purple" : "default"}
             >
               {stats.image_provider === "seedream" ? "Seedream 真实生成" : "Mock 快速预览"}
@@ -178,7 +178,7 @@ function AccountHealthSection() {
         <div className="rounded-xl bg-surface px-3 py-2.5">
           <div className="text-xs text-ink-muted">定时报告调度</div>
           <div className="mt-0.5">
-            <Tag bordered={false} color={stats.scheduler_running ? "success" : "warning"}>
+            <Tag variant="filled" color={stats.scheduler_running ? "success" : "warning"}>
               {stats.scheduler_running ? "运行中" : "未启动"}
             </Tag>
           </div>
@@ -235,7 +235,7 @@ function AccountHealthSection() {
         <div className="mt-2 space-y-1.5">
           {stats.degradations.slice(0, 8).map((d, i) => (
             <div key={i} className="flex items-start gap-2 rounded-lg bg-surface px-3 py-2 text-xs">
-              <Tag bordered={false} color="orange" className="mr-0 shrink-0">
+              <Tag variant="filled" color="orange" className="mr-0 shrink-0">
                 {DEGRADATION_LABEL[d.source] ?? d.source}
               </Tag>
               <span className="text-ink-muted">{dayjs(d.at).format("MM-DD HH:mm")}</span>
@@ -400,7 +400,7 @@ function ReportsSection() {
         key: "type",
         width: 90,
         render: (_, item) => (
-          <Tag bordered={false} color={item.type === "daily" ? "blue" : "purple"}>
+          <Tag variant="filled" color={item.type === "daily" ? "blue" : "purple"}>
             {item.type === "daily" ? "日报" : "周报"}
           </Tag>
         ),
@@ -426,7 +426,7 @@ function ReportsSection() {
         render: (_, item) => {
           const meta = EMAIL_STATUS_TAG[item.email_status];
           return (
-            <Tag bordered={false} color={meta.color}>
+            <Tag variant="filled" color={meta.color}>
               {meta.label}
             </Tag>
           );

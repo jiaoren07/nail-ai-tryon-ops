@@ -142,7 +142,7 @@ export default function RDetail() {
                 <div className="flex justify-between">
                   <dt className="text-ink-muted">类型</dt>
                   <dd>
-                    <Tag bordered={false} color={detail.type === "daily" ? "blue" : "purple"}>
+                    <Tag variant="filled" color={detail.type === "daily" ? "blue" : "purple"}>
                       {detail.type === "daily" ? "日报" : "周报"}
                     </Tag>
                   </dd>
@@ -173,7 +173,7 @@ export default function RDetail() {
                   <dt className="text-ink-muted">邮件状态</dt>
                   <dd className="flex items-center gap-1.5">
                     {statusMeta && (
-                      <Tag bordered={false} color={statusMeta.color} className="mr-0">
+                      <Tag variant="filled" color={statusMeta.color} className="mr-0">
                         {statusMeta.label}
                       </Tag>
                     )}
