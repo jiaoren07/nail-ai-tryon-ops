@@ -344,9 +344,17 @@ async def _gen_batch_reasons(
 async def recommend_endpoint(
     body: RecommendBody,
     request: Request,
+    fast: bool = Query(False),
     db: AsyncSession = Depends(get_db),
 ):
-    """Plan §4.5: 9-style recommendation + per-card LLM reason (≤25 chars)."""
+    """Plan §4.5: 9-style recommendation + per-card LLM reason (≤25 chars).
+
+    Batch F: `?fast=1` skips the batched LLM call (which takes ~10s on
+    the 235B quick model) and answers with template reasons +
+    `reasons_pending: true`; the frontend then fetches real copy from
+    POST /recommend/reasons and patches it in. Default stays the original
+    synchronous behavior so Step 4.5's contract and check script hold.
+    """
     if body.user_id != request.headers["X-User-Id"]:
         raise HTTPException(400, "user_id_mismatch")
     if body.gender not in {"female", "male"}:
@@ -357,9 +365,13 @@ async def recommend_endpoint(
         return ok(data={
             "user_summary": _user_summary(body.gender, body.hand_features),
             "recommendations": [],
+            "reasons_pending": False,
         })
 
-    reasons = await _gen_batch_reasons(recs, body.gender, body.hand_features)
+    if fast:
+        reasons = [_fallback_reason(item, body.gender) for item in recs]
+    else:
+        reasons = await _gen_batch_reasons(recs, body.gender, body.hand_features)
 
     return ok(data={
         "user_summary": _user_summary(body.gender, body.hand_features),
@@ -375,6 +387,49 @@ async def recommend_endpoint(
             }
             for item, reason in zip(recs, reasons)
         ],
+        "reasons_pending": bool(fast),
+    })
+
+
+class ReasonsBody(BaseModel):
+    gender: str
+    hand_features: dict
+    style_ids: list[str]
+
+
+@router.post("/recommend/reasons")
+async def recommend_reasons(body: ReasonsBody, db: AsyncSession = Depends(get_db)):
+    """Batch F: second leg of the async recommend flow — one batched LLM
+    call for the styles the fast leg already returned. Styles are
+    re-fetched from DB (client attributes are not trusted). On LLM
+    failure the shared helper degrades to templates, so this endpoint
+    always answers with usable text."""
+    if body.gender not in {"female", "male"}:
+        raise HTTPException(400, "invalid_gender")
+    if not 1 <= len(body.style_ids) <= 12:
+        raise HTTPException(400, "style_ids_out_of_range")
+
+    styles = (
+        await db.execute(select(Style).where(Style.id.in_(body.style_ids)))
+    ).scalars().all()
+    styles_map = {s.id: s for s in styles}
+    items = [
+        {
+            "id": sid,
+            "name": styles_map[sid].name,
+            "style_tags": json.loads(styles_map[sid].style_tags),
+            "color_main": styles_map[sid].color_main,
+            "color_tone": styles_map[sid].color_tone,
+        }
+        for sid in body.style_ids
+        if sid in styles_map
+    ]
+    if not items:
+        raise HTTPException(404, "styles_not_found")
+
+    reasons = await _gen_batch_reasons(items, body.gender, body.hand_features)
+    return ok(data={
+        "reasons": {item["id"]: reason for item, reason in zip(items, reasons)},
     })
 
 

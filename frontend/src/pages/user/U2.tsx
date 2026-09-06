@@ -30,6 +30,7 @@ interface RecommendItem {
 interface RecommendData {
   user_summary: string;
   recommendations: RecommendItem[];
+  reasons_pending?: boolean;
 }
 
 export default function U2() {
@@ -50,20 +51,49 @@ export default function U2() {
     if (!photoId || !handFeatures) { navigate("/upload", { replace: true }); return; }
   }, [userGender, photoId, handFeatures, navigate]);
 
-  // Fetch recommendations (internal guard, runs only when all 3 are set)
+  // Fetch recommendations (internal guard, runs only when all 3 are set).
+  // Batch F two-leg flow: `?fast=1` returns cards ~instantly with template
+  // reasons, then /recommend/reasons brings the real LLM copy (~10s on the
+  // 235B quick model) which is patched in card-by-card. If the second leg
+  // fails, templates simply stay — same degradation contract as before.
   useEffect(() => {
     if (!userGender || !photoId || !handFeatures) return;
     let cancelled = false;
     async function go() {
       setLoading(true);
       try {
-        const r = await api.post("/api/recommend", {
+        const r = await api.post("/api/recommend?fast=1", {
           user_id: userId,
           gender: userGender,
           hand_features: handFeatures,
         });
-        if (!cancelled && r.data?.code === 0) {
-          setData(r.data.data);
+        if (cancelled || r.data?.code !== 0) return;
+        const fastData: RecommendData = r.data.data;
+        setData(fastData);
+        setLoading(false);
+
+        if (!fastData.reasons_pending || fastData.recommendations.length === 0) return;
+        try {
+          const r2 = await api.post("/api/recommend/reasons", {
+            gender: userGender,
+            hand_features: handFeatures,
+            style_ids: fastData.recommendations.map((it) => it.style_id),
+          }, { suppressToast: true });
+          if (cancelled || r2.data?.code !== 0) return;
+          const reasons: Record<string, string> = r2.data.data.reasons;
+          setData((prev) => prev && {
+            ...prev,
+            reasons_pending: false,
+            recommendations: prev.recommendations.map((it) => ({
+              ...it,
+              reason: reasons[it.style_id] || it.reason,
+            })),
+          });
+        } catch {
+          // LLM leg failed — keep templates, mark settled.
+          if (!cancelled) {
+            setData((prev) => prev && { ...prev, reasons_pending: false });
+          }
         }
       } finally {
         if (!cancelled) setLoading(false);
@@ -146,6 +176,11 @@ export default function U2() {
             <p className="text-base font-semibold text-ink">
               {data?.user_summary ?? "正在分析你的手部特征..."}
             </p>
+            {data?.reasons_pending && (
+              <p className="mt-0.5 text-xs text-ai-purple animate-pulse">
+                AI 正在为每款撰写推荐理由…
+              </p>
+            )}
           </div>
           <span className="hidden md:inline-block px-3 py-1 rounded-full bg-ai-wash text-ai-purple text-xs font-medium">
             U2 · 智能推荐 9 款
