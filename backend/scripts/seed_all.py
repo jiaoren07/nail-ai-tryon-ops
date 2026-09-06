@@ -20,7 +20,7 @@ sys.path.insert(0, str(BACKEND_ROOT))
 sys.path.insert(0, str(HERE))
 
 from app.db import engine, init_db  # noqa: E402
-from seed_stats import seed_stats  # noqa: E402
+from seed_stats import apply_heat_scores, seed_stats  # noqa: E402
 from seed_styles import _copy_static, seed_styles  # noqa: E402
 from seed_tryons import seed_tryons  # noqa: E402
 
@@ -54,11 +54,12 @@ async def main() -> None:
     n_tryons = await seed_tryons()
     print(f"[{_ts()}]   done in {time.time() - t0:.2f}s  tryons={n_tryons}\n")
 
-    # Step 4: seed_stats
+    # Step 4: seed_stats + heat scores derived from seeded volume
     t0 = time.time()
-    print(f"[{_ts()}] step 4/4 seed_stats()")
+    print(f"[{_ts()}] step 4/4 seed_stats() + apply_heat_scores()")
     n_stats = await seed_stats()
-    print(f"[{_ts()}]   done in {time.time() - t0:.2f}s  stats={n_stats}\n")
+    n_heat = await apply_heat_scores()
+    print(f"[{_ts()}]   done in {time.time() - t0:.2f}s  stats={n_stats}  heat_scored={n_heat}\n")
 
     elapsed = time.time() - overall_start
     print(f"[{_ts()}] === seed_all done in {elapsed:.2f}s ===")

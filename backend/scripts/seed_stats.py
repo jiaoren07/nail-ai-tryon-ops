@@ -71,6 +71,38 @@ async def seed_stats() -> int:
     return len(rows)
 
 
+async def apply_heat_scores() -> int:
+    """Derive styles.heat_score from seeded cumulative tryon volume.
+
+    Min-max scaled to [25, 95], 1 decimal. Deterministic (tryons are
+    seeded with a fixed RNG), and consistent with the numbers shown in
+    O3/O6 — replaces the uniform 50.0 placeholder that made the O6 heat
+    column look fake and fed the recommender's 20% heat weight no signal.
+    """
+    async with AsyncSession(engine) as session:
+        counts = (await session.execute(text(
+            "SELECT style_id, COUNT(*) AS n FROM tryons GROUP BY style_id"
+        ))).all()
+        by_style = {r.style_id: int(r.n) for r in counts}
+        if not by_style:
+            return 0
+        low, high = min(by_style.values()), max(by_style.values())
+        span = (high - low) or 1
+        for style_id, n in by_style.items():
+            heat = round(25 + (n - low) / span * 70, 1)
+            await session.execute(
+                text("UPDATE styles SET heat_score = :h WHERE id = :sid"),
+                {"h": heat, "sid": style_id},
+            )
+        # styles with zero seeded tryons (none today, but be safe) -> floor
+        await session.execute(text(
+            "UPDATE styles SET heat_score = 25.0 "
+            "WHERE id NOT IN (SELECT DISTINCT style_id FROM tryons)"
+        ))
+        await session.commit()
+    return len(by_style)
+
+
 async def _main() -> None:
     n = await seed_stats()
     print(f"style_stats inserted: {n}")
