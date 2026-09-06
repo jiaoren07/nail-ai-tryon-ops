@@ -23,6 +23,7 @@ from typing import Any, Literal, Sequence
 from openai import APIStatusError, APITimeoutError, AsyncOpenAI, RateLimitError
 
 from app.config import settings
+from app.services import health_stats
 
 logger = logging.getLogger("nail_demo.llm")
 
@@ -115,7 +116,12 @@ async def gen_text(prompt: str, model: Tier = "quick", max_tokens: int = 200) ->
             max_tokens=max_tokens,
         )
 
-    resp = await _with_retry(_call)
+    try:
+        resp = await _with_retry(_call)
+    except Exception as e:
+        health_stats.record_call(f"llm_{model}", ok=False, reason=str(e))
+        raise
+    health_stats.record_call(f"llm_{model}", ok=True)
     return (resp.choices[0].message.content or "").strip()
 
 
@@ -140,5 +146,10 @@ async def gen_text_with_tools(
             kwargs["tool_choice"] = "auto"
         return await client.chat.completions.create(**kwargs)
 
-    resp = await _with_retry(_call)
+    try:
+        resp = await _with_retry(_call)
+    except Exception as e:
+        health_stats.record_call(f"llm_{model}", ok=False, reason=str(e))
+        raise
+    health_stats.record_call(f"llm_{model}", ok=True)
     return resp.choices[0].message

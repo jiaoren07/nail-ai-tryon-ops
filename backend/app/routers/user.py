@@ -42,7 +42,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db import async_session_maker, get_db
 from app.models import Style, StyleStats, Tryon
 from app.responses import ok
-from app.services import llm
+from app.services import health_stats, llm
 from app.services.image_gen import ImageGenError, get_image_provider
 from app.services.recommend import recommend
 
@@ -333,8 +333,10 @@ async def _gen_batch_reasons(
         ]
     except Exception as e:
         # WARNING, not info: silent template degradation hid a 100%-fallback
-        # regression for days after a model swap. Degradation must be loud.
+        # regression for days after a model swap. Degradation must be loud —
+        # in logs AND on the O7 service-health panel.
         _log.warning("recommend: batch LLM fell back: %s", e)
+        health_stats.record_degradation("recommend_reasons", str(e))
         return [_fallback_reason(item, gender) for item in items]
 
 
@@ -423,7 +425,9 @@ async def _do_tryon(
         result_url = await provider.generate(user_id, style_id, photo_bytes)
     except ImageGenError as e:
         _log.warning("tryon: image-gen failed for style=%s: %s", style_id, e)
+        health_stats.record_call("image_gen", ok=False, reason=str(e))
         raise HTTPException(500, "tryon_generation_failed") from e
+    health_stats.record_call("image_gen", ok=True)
 
     # Defaults for optional fields. user_gender derives from the style if the
     # caller didn't supply one; `both` (none exist today but kept for future)
@@ -648,6 +652,54 @@ async def get_tryon(
             "color_tone": s.color_tone,
             "length_pref": s.length_pref,
         },
+    })
+
+
+# ===== Batch E: GET /api/tryons — current user's try-on history =====
+
+@router.get("/tryons")
+async def list_my_tryons(
+    request: Request,
+    collected_only: bool = Query(False),
+    limit: int = Query(50, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+):
+    """U6 「我的试戴」: the caller's own try-on history, newest first.
+
+    Identity = X-User-Id header (middleware-validated). Legacy seed rows
+    without result_url are excluded — they have no image to show and
+    belong to synthetic seeded users anyway.
+    """
+    user_id = request.headers["X-User-Id"]
+    stmt = (
+        select(Tryon, Style)
+        .join(Style, Tryon.style_id == Style.id)
+        .where(Tryon.user_id == user_id)
+        .where(Tryon.result_url.is_not(None))
+        .order_by(Tryon.created_at.desc(), Tryon.id.desc())
+        .limit(limit)
+    )
+    if collected_only:
+        stmt = stmt.where(Tryon.is_collected == 1)
+    rows = (await db.execute(stmt)).all()
+    return ok(data={
+        "items": [
+            {
+                "tryon_id": t.id,
+                "style_id": s.id,
+                "style_name": s.name,
+                "cover_url": s.cover_url,
+                "result_url": t.result_url,
+                "is_collected": bool(t.is_collected),
+                "from_module": t.from_module,
+                "created_at": (
+                    t.created_at.isoformat() + "+00:00"
+                    if t.created_at and t.created_at.tzinfo is None
+                    else (t.created_at.isoformat() if t.created_at else None)
+                ),
+            }
+            for t, s in rows
+        ],
     })
 
 

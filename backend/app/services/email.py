@@ -100,11 +100,17 @@ async def send_email(
             srv.login(settings.SMTP_USER, settings.SMTP_PASS)
             srv.send_message(msg)
 
+    from app.services import health_stats
+
     try:
         await asyncio.to_thread(_send_sync)
     except smtplib.SMTPException as e:
+        health_stats.record_call("email", ok=False, reason=str(e))
         raise EmailSendError(f"SMTP error: {type(e).__name__}: {e}") from e
     except OSError as e:
+        health_stats.record_call("email", ok=False, reason=str(e))
         raise EmailSendError(f"network error reaching SMTP: {e}") from e
     except Exception as e:
+        health_stats.record_call("email", ok=False, reason=str(e))
         raise EmailSendError(f"unexpected error: {type(e).__name__}: {e}") from e
+    health_stats.record_call("email", ok=True)
