@@ -62,6 +62,194 @@ function loadSubscription(): Subscription {
   return { enabled: true, email: "", frequencies: ["daily", "weekly"] };
 }
 
+interface HealthService {
+  ok: number;
+  fail: number;
+  last_ok_at: string | null;
+  last_fail_at: string | null;
+  last_fail_reason: string | null;
+}
+
+interface HealthStats {
+  started_at: string;
+  uptime_seconds: number;
+  services: Record<string, HealthService>;
+  degradations: Array<{ at: string; source: string; reason: string }>;
+  image_provider: string;
+  scheduler_enabled: boolean;
+  scheduler_running: boolean;
+  llm_quick_model: string;
+  llm_strong_model: string;
+}
+
+const SERVICE_LABEL: Record<string, string> = {
+  llm_quick: "LLM 轻量档",
+  llm_strong: "LLM 强推理档",
+  image_gen: "图像生成",
+  email: "邮件发送",
+};
+
+const DEGRADATION_LABEL: Record<string, string> = {
+  recommend_reasons: "推荐理由 → 模板降级",
+  ops_chat: "AI 助手 → 数据摘要降级",
+};
+
+function formatUptime(seconds: number): string {
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  return h > 0 ? `${h} 小时 ${m} 分` : `${m} 分 ${seconds % 60} 秒`;
+}
+
+/** Batch E: real content for the 账号工作台 tab — the degradation
+ * visibility panel. Every fallback in this product used to be silent
+ * (which once hid a 100%-template regression for days); this makes the
+ * safety net observable. Window = since backend process start. */
+function AccountHealthSection() {
+  const [stats, setStats] = useState<HealthStats | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [reloadToken, setReloadToken] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadStats = async () => {
+      try {
+        const response = await api.get<ApiEnvelope<HealthStats>>(
+          "/api/ops/health-stats",
+          { suppressToast: true },
+        );
+        if (response.data.code !== 0) {
+          throw new Error(response.data.msg || "health_error");
+        }
+        if (!cancelled) {
+          setStats(response.data.data);
+          setError(null);
+        }
+      } catch (requestError) {
+        if (!cancelled) {
+          const msg =
+            requestError instanceof Error ? requestError.message : "health_request_failed";
+          setError(msg);
+        }
+      }
+    };
+
+    void loadStats();
+    return () => {
+      cancelled = true;
+    };
+  }, [reloadToken]);
+
+  if (error) {
+    return <Alert type="warning" showIcon message="服务状态暂不可用" description={error} />;
+  }
+  if (!stats) {
+    return <div className="py-8 text-center text-sm text-ink-muted">加载服务状态…</div>;
+  }
+
+  const serviceKeys = Object.keys(SERVICE_LABEL).filter(
+    (key) => stats.services[key] || key.startsWith("llm"),
+  );
+
+  return (
+    <div className="max-w-[760px]">
+      <div className="flex items-center justify-between">
+        <div className="text-sm font-semibold text-ink">运行状态（自后端启动起）</div>
+        <Button size="small" icon={<ReloadOutlined />} onClick={() => setReloadToken((k) => k + 1)} />
+      </div>
+      <div className="mt-3 grid grid-cols-2 gap-3 md:grid-cols-4">
+        <div className="rounded-xl bg-surface px-3 py-2.5">
+          <div className="text-xs text-ink-muted">运行时长</div>
+          <div className="mt-0.5 text-sm font-medium text-ink">
+            {formatUptime(stats.uptime_seconds)}
+          </div>
+        </div>
+        <div className="rounded-xl bg-surface px-3 py-2.5">
+          <div className="text-xs text-ink-muted">图像生成模式</div>
+          <div className="mt-0.5">
+            <Tag
+              bordered={false}
+              color={stats.image_provider === "seedream" ? "purple" : "default"}
+            >
+              {stats.image_provider === "seedream" ? "Seedream 真实生成" : "Mock 快速预览"}
+            </Tag>
+          </div>
+        </div>
+        <div className="rounded-xl bg-surface px-3 py-2.5">
+          <div className="text-xs text-ink-muted">定时报告调度</div>
+          <div className="mt-0.5">
+            <Tag bordered={false} color={stats.scheduler_running ? "success" : "warning"}>
+              {stats.scheduler_running ? "运行中" : "未启动"}
+            </Tag>
+          </div>
+        </div>
+        <div className="rounded-xl bg-surface px-3 py-2.5">
+          <div className="text-xs text-ink-muted">模型档位</div>
+          <div className="mt-0.5 truncate text-xs text-ink-secondary" title={`${stats.llm_quick_model} / ${stats.llm_strong_model}`}>
+            {stats.llm_quick_model.split("/").pop()}
+            <br />
+            {stats.llm_strong_model.split("/").pop()}
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-6 text-sm font-semibold text-ink">AI / 外部服务调用</div>
+      <div className="mt-2 overflow-hidden rounded-xl border border-line">
+        <table className="w-full text-xs">
+          <thead>
+            <tr className="bg-surface text-ink-secondary">
+              <th className="px-3 py-2 text-left font-medium">服务</th>
+              <th className="px-3 py-2 text-right font-medium">成功</th>
+              <th className="px-3 py-2 text-right font-medium">失败</th>
+              <th className="px-3 py-2 text-left font-medium">最近失败</th>
+            </tr>
+          </thead>
+          <tbody>
+            {serviceKeys.map((key) => {
+              const s = stats.services[key];
+              return (
+                <tr key={key} className="border-t border-line">
+                  <td className="px-3 py-2 text-ink">{SERVICE_LABEL[key]}</td>
+                  <td className="px-3 py-2 text-right font-medium text-success">{s?.ok ?? 0}</td>
+                  <td className={`px-3 py-2 text-right font-medium ${s?.fail ? "text-danger" : "text-ink-muted"}`}>
+                    {s?.fail ?? 0}
+                  </td>
+                  <td className="max-w-[280px] truncate px-3 py-2 text-ink-muted" title={s?.last_fail_reason ?? ""}>
+                    {s?.last_fail_at
+                      ? `${dayjs(s.last_fail_at).format("MM-DD HH:mm")} ${s.last_fail_reason ?? ""}`
+                      : "—"}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="mt-6 text-sm font-semibold text-ink">最近降级事件</div>
+      {stats.degradations.length === 0 ? (
+        <p className="mt-2 text-xs text-ink-muted">
+          无降级发生 —— 所有 AI 文案均为模型实时生成
+        </p>
+      ) : (
+        <div className="mt-2 space-y-1.5">
+          {stats.degradations.slice(0, 8).map((d, i) => (
+            <div key={i} className="flex items-start gap-2 rounded-lg bg-surface px-3 py-2 text-xs">
+              <Tag bordered={false} color="orange" className="mr-0 shrink-0">
+                {DEGRADATION_LABEL[d.source] ?? d.source}
+              </Tag>
+              <span className="text-ink-muted">{dayjs(d.at).format("MM-DD HH:mm")}</span>
+              <span className="min-w-0 truncate text-ink-secondary" title={d.reason}>
+                {d.reason}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function SubscriptionSection() {
   const { message } = AntApp.useApp();
   const [sub, setSub] = useState<Subscription>(() => loadSubscription());
@@ -329,11 +517,7 @@ export default function O7Setting() {
             {
               key: "account",
               label: "账号工作台",
-              children: (
-                <div className="py-10 text-center text-sm text-ink-muted">
-                  账号信息、API 用量与版本信息（本期占位）
-                </div>
-              ),
+              children: <AccountHealthSection />,
             },
             {
               key: "notify",
