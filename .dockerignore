@@ -1,0 +1,23 @@
+.git
+.gitignore
+.claude
+.agents
+**/.venv
+**/node_modules
+**/__pycache__
+**/*.pyc
+*.db
+*.db-journal
+frontend/dist
+backend/static/cache
+backend/static/uploads
+backend/static/styles
+backend/static/samples
+backend/.env
+.env
+Meijia/
+data-prep/
+原型1/
+docs/screenshots
+memory-bank/
+JianyingPro Drafts/

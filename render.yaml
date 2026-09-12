@@ -1,0 +1,28 @@
+# Render Blueprint — https://render.com/docs/blueprint-spec
+# Importing this repo as a Blueprint creates the service with everything
+# below pre-filled; only PPIO_API_KEY is asked for interactively.
+services:
+  - type: web
+    name: nail-ai-tryon-ops
+    runtime: docker
+    plan: free
+    region: singapore          # Render 距中国大陆最近的区域
+    healthCheckPath: /api/health
+    envVars:
+      - key: DATABASE_URL
+        value: sqlite+aiosqlite:///./nail_demo.db
+      # mock = 零成本、永远可用的试戴兜底（结果图为款式封面，界面已如实
+      # 标注「快速预览模式」）。想让访客看到真实 AI 合成就在 Render 面板
+      # 改成 seedream —— 费用按 PPIO 实际调用计，SEEDREAM_DAILY_QUOTA 封顶。
+      - key: IMAGE_PROVIDER
+        value: mock
+      - key: SEEDREAM_DAILY_QUOTA
+        value: "20"
+      # 在 Render 面板填入（不入仓库）
+      - key: PPIO_API_KEY
+        sync: false
+      - key: SCHEDULER_ENABLED
+        value: "true"
+      # 免费层磁盘本就是临时的：每次冷启动都会重新 seed，无需额外的夜间任务
+      - key: DAILY_RESEED
+        value: "false"

@@ -1,0 +1,4 @@
+# Shell scripts must keep LF: a CRLF start.sh makes the container's `sh`
+# fail with an unreadable "\r: not found" error.
+*.sh text eol=lf
+Dockerfile text eol=lf
