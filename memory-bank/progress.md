@@ -2022,6 +2022,29 @@ benchmark 时发现原 `.env` 写的 model ID 在 PPIO 实际不可用 / 不合�
 
 ---
 
+### ✅ 维护期 · 公开化改造（Batch E/F/G + 资产入仓 + 终态决策）— 2026-09-05 ~ 09-12
+
+> 主线 55 步完结后的维护期合并记录（三批节奏快，此条补记）。定位从"比赛 demo"
+> 转为"个人 vibecoding 作品集项目"，仓库已公开：github.com/jiaoren07/nail-ai-tryon-ops
+
+**关键决策链（用户拍板）：**
+1. 图片资产直接入仓（58.3MB 分 15 批推送绕代理阈值），seed 改读 `assets/dataset/` —— 任何 clone 即可完整运行；README 数据声明附"涉权联系删除"条款
+2. 简历不放在线链接、面试以投屏为主 → **不部署，GitHub 仓库为唯一公开面**（Vercel 形状不合：SQLite/长驻调度器/60s 报告 vs serverless；免费替代品的冷启动+海外节点正中筛简历场景痛点）
+3. 部署改造代码侧仍全部完成并验证（可随时上线）：单一来源模式、DAILY_RESEED 夜间自愈、SEEDREAM_DAILY_QUOTA 额度护栏、docs/deploy.md 手册
+
+**Batch E（fresh-eyes 巡检 7 修复）**：/history 调试页→「我的试戴」真页面+干净 404（DebugBar 删除）；mock「快速预览模式」诚实标注（假 ms 耗时移除）；O1 预警卡接 trending 真数（曾恒 0）；heat_score 从种子行为推导（25-95，曾全 50）；「加入对比」44px 级触控热区+真 button；降级健康面板并入 O7 账号工作台（服务计数+降级事件流水）；README 四张 Playwright 截图+界面预览节。附带根治一起换模型引入的回归：**推荐理由超时 4.5s 饿死新模型→100% 静默模板降级潜伏数日**（超时 15s+降级日志升 WARNING——"降级不许安静"由此成为产品原则）。
+
+**Batch F（缓修清偿）**：antd v6 弃用 API 全量清理（14 处 Tag variant / 4 处 Drawer size / 1 处 Statistic styles.content，console 错误通道归零）；推荐理由异步化（`?fast=1` 秒回卡片+`/recommend/reasons` 补 LLM 文案原位替换+「AI 撰写中」指示，原同步契约保留）。
+
+**Batch G（提速+部署改造）**：<2MB 免压缩直传——**点样例到见卡 9s→1s 实测**（7s 全是浏览器压缩）；全前端 10 处硬编码 localhost 统一到 utils/url 的 API_BASE（生产构建走相对路径），顺手拆掉 U5 本地 absUrl 函数替换后自递归的隐患；main.py SPA fallback 托管 dist；:8000 单端口全流程浏览器实测通过。
+
+**给后续开发者的提示：**
+- quick 模型已是 `qwen3-235b-a22b-instruct-2507`（旧 80b 被 PPIO 下架触发过上述回归）；LLM 生成耗时 6-12s 波动
+- 图片资产的推送经验：这条代理链路单次 POST 阈值约 5MB，大文件批量推送用"按体积贪心分组、每组独立 commit+push"（Batch G 的 15 批脚本模式）
+- 剩余 roadmap 仅"双模式试戴"（叙事级，README 有修正版理由）；用户侧可选动作：Profile pin、Gitee 镜像
+
+---
+
 ### 📌 项目锁定状态 + 公约提醒（无需每步更新，状态真变才改）
 
 > 本段是**稳定的锁定状态指针**，不是 step-by-step 的进度条。

@@ -12,14 +12,15 @@ that the previous session accumulated but never made explicit in the repo.
 
 Then before writing any code, **summarize the 5 workflow rules + current state + Step goal** back to the user for confirmation.
 
-## 1. Current build state (as of 2026-08-28) — PROJECT COMPLETE
+## 1. Current build state (as of 2026-09-12) — COMPLETE, public-portfolio posture
 
-- **All 55 plan steps done (Phase 0-10) + 收尾清单 5/5.** The repo is at the plan's "可交付最小完整状态": root README quickstart, locked deps, aligned .env.example, fresh-DB rebuild verified, no debug routes.
-- **Real email send verified once (user-approved): report #10 → sent + inbox delivery.** Default posture per user instruction: SMTP stays ISOLATED (`$env:SMTP_HOST="smtp-disabled.invalid"` before uvicorn) unless a session actually needs real sending.
-- **DB is in clean handover state** (fresh seed, zero reports/notifications/audit residue). Old test data backed up in session scratchpad only.
-- Rate-limit reality: BOTH PPIO tiers minute-limited (~5 req/min); chat degrades to data-grounded template replies on 429; report generation 30-60s (reasoning model, comparisons precomputed in code).
-- Optional backlog (no plan steps remain): antd v6 deprecated-API sweep (Tag bordered / Drawer width / Statistic valueStyle), route-level code splitting (main chunk 2.4MB), PPIO key rotation (user does it in the PPIO console).
-- `git log --oneline -30` shows the trail. Batch records: progress.md "Batch A/B/C/D" entries.
+- **All 55 plan steps done (Phase 0-10) + 收尾清单 5/5**, followed by a maintenance period (Batch E/F/G, progress.md "维护期" entry) that closed every self-serviceable backlog item.
+- **Public face = the GitHub repo ONLY (final user decision, 2026-09-12).** https://github.com/jiaoren07/nail-ai-tryon-ops — public, seed assets ship in-repo (any clone runs fully imaged), README has screenshots/architecture/roadmap, repo About+topics set. **No live deployment** (interview strategy is screen-share; docs/deploy.md keeps the option open — server-side steps only, code side is deployment-ready).
+- **Single-origin mode exists**: after `npm run build`, the backend alone on :8000 serves the whole app (SPA fallback, relative API URLs). Vite :5173 dev flow unchanged.
+- New env guards (default off/safe): `DAILY_RESEED` (nightly 04:30 self-heal, for public deploys), `SEEDREAM_DAILY_QUOTA` (spend cap → mock fallback). Quick model is now `qwen/qwen3-235b-a22b-instruct-2507` (old 80b delisted by PPIO).
+- Default local posture unchanged: SMTP isolated (`$env:SMTP_HOST="smtp-disabled.invalid"`), IMAGE_PROVIDER=mock, reseed before demos.
+- Remaining user-only actions (optional): pin repo on GitHub profile; Gitee mirror for mainland image loading; PPIO console key hygiene (done 2026-09-04: leaked key revoked).
+- `git log --oneline -40` shows the trail. Batch records: progress.md "Batch A/B/C/D" + "维护期" entries.
 
 ## 2. Workflow — five hard rules
 
