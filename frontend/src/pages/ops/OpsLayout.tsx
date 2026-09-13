@@ -4,6 +4,7 @@ import {
   FireOutlined,
   RobotOutlined,
   SettingOutlined,
+  SwapOutlined,
   WarningOutlined,
 } from "@ant-design/icons";
 import { Drawer, FloatButton, Layout, Menu, Tag } from "antd";
@@ -72,9 +73,20 @@ export default function OpsLayout() {
           onClick={({ key }) => navigate(key)}
         />
 
-        <div className="absolute bottom-5 left-5 right-5 rounded-xl border border-white/10 bg-white/5 px-4 py-3">
-          <div className="text-xs font-medium text-white/80">实时数据闭环</div>
-          <div className="text-[11px] text-white/40 mt-1">用户行为与运营动作即时同步</div>
+        <div className="absolute bottom-5 left-5 right-5">
+          {/* Batch H: one-click way back to the consumer side — previously
+              the only route out of /ops was mashing the back button. */}
+          <button
+            type="button"
+            onClick={() => navigate("/")}
+            className="mb-3 flex w-full items-center justify-center gap-1.5 rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-xs font-medium text-white/70 transition hover:bg-white/10 hover:text-white"
+          >
+            <SwapOutlined /> 切换到用户端
+          </button>
+          <div className="rounded-xl border border-white/10 bg-white/5 px-4 py-3">
+            <div className="text-xs font-medium text-white/80">实时数据闭环</div>
+            <div className="text-[11px] text-white/40 mt-1">用户行为与运营动作即时同步</div>
+          </div>
         </div>
       </Sider>
 
