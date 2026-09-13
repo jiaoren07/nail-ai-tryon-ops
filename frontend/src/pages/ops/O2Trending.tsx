@@ -11,6 +11,7 @@ import {
   Card,
   Drawer,
   Empty,
+  Popconfirm,
   Table,
   Tag,
   theme,
@@ -212,8 +213,18 @@ export default function O2Trending() {
       {
         title: "发现时间",
         key: "detected",
-        width: 110,
+        width: 90,
         render: (_, item) => dayjs(item.detected_at).format("HH:mm"),
+      },
+      {
+        // Batch H: the rule engine's suggestion used to hide in the
+        // drawer, leaving a bare "采纳建议" button nobody could parse.
+        title: "AI 建议",
+        key: "suggestion",
+        width: 190,
+        render: (_, item) => (
+          <span className="text-xs text-ink-secondary">{item.suggested_action}</span>
+        ),
       },
       {
         title: "操作",
@@ -222,19 +233,31 @@ export default function O2Trending() {
         render: (_, item) => {
           const adopted = adoptedIds.has(item.style_id);
           return (
-            <Button
-              size="small"
-              type={adopted ? "default" : "primary"}
+            <Popconfirm
+              title="采纳该建议？"
+              description={
+                <span className="block max-w-[280px] text-xs leading-5">
+                  将把「{item.name}」提升到用户端推荐与浏览的最前位
+                  （display_order 置为全场最小），刷新即生效，并写入运营审计。
+                </span>
+              }
+              okText="确认采纳"
+              cancelText="取消"
               disabled={adopted}
-              loading={adoptingId === item.style_id}
-              icon={adopted ? <CheckOutlined /> : <RiseOutlined />}
-              onClick={(event) => {
-                event.stopPropagation();
-                void adopt(item);
-              }}
+              onConfirm={() => void adopt(item)}
+              onPopupClick={(event) => event.stopPropagation()}
             >
-              {adopted ? "已采纳" : "采纳建议"}
-            </Button>
+              <Button
+                size="small"
+                type={adopted ? "default" : "primary"}
+                disabled={adopted}
+                loading={adoptingId === item.style_id}
+                icon={adopted ? <CheckOutlined /> : <RiseOutlined />}
+                onClick={(event) => event.stopPropagation()}
+              >
+                {adopted ? "已采纳" : "采纳建议"}
+              </Button>
+            </Popconfirm>
           );
         },
       },
@@ -318,6 +341,10 @@ export default function O2Trending() {
           dataSource={items}
           loading={loading}
           pagination={false}
+          // Batch H added the AI-建议 column; on narrow viewports antd
+          // would crush every column instead of scrolling — pin a min
+          // width (≈ sum of column widths) so the table scrolls in place.
+          scroll={{ x: 1120 }}
           locale={{
             emptyText: (
               <Empty
@@ -386,18 +413,31 @@ export default function O2Trending() {
               <div className="mt-1 text-sm text-ink">{active.suggested_action}</div>
             </div>
 
-            <Button
-              className="mt-5"
-              block
-              type="primary"
-              size="large"
+            <Popconfirm
+              title="采纳该建议？"
+              description={
+                <span className="block max-w-[300px] text-xs leading-5">
+                  将把「{active.name}」提升到用户端推荐与浏览的最前位
+                  （display_order 置为全场最小），刷新即生效，并写入运营审计。
+                </span>
+              }
+              okText="确认采纳"
+              cancelText="取消"
               disabled={activeAdopted}
-              loading={adoptingId === active.style_id}
-              icon={activeAdopted ? <CheckOutlined /> : <RiseOutlined />}
-              onClick={() => void adopt(active)}
+              onConfirm={() => void adopt(active)}
             >
-              {activeAdopted ? "已采纳该建议" : "采纳建议（提升推荐位）"}
-            </Button>
+              <Button
+                className="mt-5"
+                block
+                type="primary"
+                size="large"
+                disabled={activeAdopted}
+                loading={adoptingId === active.style_id}
+                icon={activeAdopted ? <CheckOutlined /> : <RiseOutlined />}
+              >
+                {activeAdopted ? "已采纳该建议" : "采纳建议（提升推荐位）"}
+              </Button>
+            </Popconfirm>
           </div>
         )}
       </Drawer>
