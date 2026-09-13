@@ -12,15 +12,16 @@ that the previous session accumulated but never made explicit in the repo.
 
 Then before writing any code, **summarize the 5 workflow rules + current state + Step goal** back to the user for confirmation.
 
-## 1. Current build state (as of 2026-09-12) — COMPLETE, public-portfolio posture
+## 1. Current build state (as of 2026-09-13) — COMPLETE, public-portfolio posture
 
-- **All 55 plan steps done (Phase 0-10) + 收尾清单 5/5**, followed by a maintenance period (Batch E/F/G, progress.md "维护期" entry) that closed every self-serviceable backlog item.
-- **Public face = the GitHub repo ONLY (final user decision, 2026-09-12).** https://github.com/jiaoren07/nail-ai-tryon-ops — public, seed assets ship in-repo (any clone runs fully imaged), README has screenshots/architecture/roadmap, repo About+topics set. **No live deployment** (interview strategy is screen-share; docs/deploy.md keeps the option open — server-side steps only, code side is deployment-ready).
+- **All 55 plan steps done (Phase 0-10) + 收尾清单 5/5**, followed by a maintenance period (Batch E/F/G) and a user-playtest fix round (Batch H, 2026-09-13) — see progress.md "维护期" / "Batch H" entries.
+- **Public face = GitHub repo + live Render deployment (user decision, 2026-09-12).** Repo: https://github.com/jiaoren07/nail-ai-tryon-ops (public, seed assets in-repo, any clone runs fully imaged). Live: https://nail-ai-tryon-ops.onrender.com (Render free tier, Docker, Singapore; sleeps after 15min idle, 30-60s cold start, DB re-seeds every cold start). Interview demos still run on localhost (screen-share).
 - **Single-origin mode exists**: after `npm run build`, the backend alone on :8000 serves the whole app (SPA fallback, relative API URLs). Vite :5173 dev flow unchanged.
-- New env guards (default off/safe): `DAILY_RESEED` (nightly 04:30 self-heal, for public deploys), `SEEDREAM_DAILY_QUOTA` (spend cap → mock fallback). Quick model is now `qwen/qwen3-235b-a22b-instruct-2507` (old 80b delisted by PPIO).
-- Default local posture unchanged: SMTP isolated (`$env:SMTP_HOST="smtp-disabled.invalid"`), IMAGE_PROVIDER=mock, reseed before demos.
-- Remaining user-only actions (optional): pin repo on GitHub profile; Gitee mirror for mainland image loading; PPIO console key hygiene (done 2026-09-04: leaked key revoked).
-- `git log --oneline -40` shows the trail. Batch records: progress.md "Batch A/B/C/D" + "维护期" entries.
+- Env guards: `DAILY_RESEED` (nightly 04:30 self-heal, for persistent-disk deploys), `SEEDREAM_DAILY_QUOTA` (spend cap → mock fallback). Quick model is `qwen/qwen3-235b-a22b-instruct-2507` (old 80b delisted by PPIO); `VLM_MODEL` (Batch H) powers the U1 hand-photo upload gate.
+- **Email subsystem REMOVED (Batch H, user decision).** Reports are in-app only: history in O7 报告中心 + bell notifications. There is no SMTP config, no email.py, no 邮件状态 anywhere — the old `$env:SMTP_HOST="smtp-disabled.invalid"` isolation ritual is obsolete. Schema changed (reports table lost email columns): after pulling, delete `nail_demo.db` and reseed.
+- Default local posture: IMAGE_PROVIDER=mock, reseed before demos.
+- Remaining user-only actions (optional): pin repo on GitHub profile; Gitee mirror for mainland image loading.
+- `git log --oneline -40` shows the trail. Batch records: progress.md "Batch A/B/C/D" + "维护期" + "Batch H" entries.
 
 ## 2. Workflow — five hard rules
 
@@ -28,7 +29,7 @@ These override any general "auto-continue" behavior your default settings might 
 
 1. **Follow `implementation-plan.md` step IDs strictly.** Don't skip. Don't merge steps into one commit. Each step's `**验证**` block is the definition of done.
 
-2. **Human-in-the-loop gate — batch mode since 2026-08-27 (user-approved).** Low-risk steps with established patterns run as batches: implement + auto-verify + commit per step WITHOUT waiting, then **one user review gate at batch end** (user visually inspects all pages/behavior at once). progress.md gets one batch entry. Steps with concentrated risk still gate individually: Step 8.1 tool schemas (pause before 8.2), anything touching real SMTP sends, and any visual/AI-quality judgment. HANDOFF §7 stop conditions (destructive ops / secrets / new deps / plan deviation) always apply regardless of mode. If the user revokes batch mode, revert to per-step waiting.
+2. **Human-in-the-loop gate — batch mode since 2026-08-27 (user-approved).** Low-risk steps with established patterns run as batches: implement + auto-verify + commit per step WITHOUT waiting, then **one user review gate at batch end** (user visually inspects all pages/behavior at once). progress.md gets one batch entry. Steps with concentrated risk still gate individually: Step 8.1 tool schemas (pause before 8.2) and any visual/AI-quality judgment. HANDOFF §7 stop conditions (destructive ops / secrets / new deps / plan deviation) always apply regardless of mode. If the user revokes batch mode, revert to per-step waiting.
 
 3. **Every step report ends with a `手动验证方法` section.** Give the user a copy-pasteable command + describe what "通过" looks like. Don't wait to be asked. From Step 5 onward, one primary path (auto script → "ALL PASS") is enough; only add secondary paths if they have demo value or the primary is fragile.
 
@@ -95,12 +96,12 @@ The implementation plan is exhausted (55/55 + closing checklist). What remains i
 
 **Demo-day runbook:**
 1. `cd backend; .venv\Scripts\python.exe -X utf8 scripts\seed_all.py` — anchors time windows to "now"; run again if a day rolls over mid-prep.
-2. Backend: `.venv\Scripts\python.exe -m uvicorn app.main:app --port 8000` (real email active — the scheduler will send at 09:00 if left running; prepend `$env:SMTP_HOST="smtp-disabled.invalid"` to isolate, the user's preferred default outside email demos).
-3. Frontend: `cd frontend; npm run dev` → http://localhost:5173.
+2. Backend: `.venv\Scripts\python.exe -m uvicorn app.main:app --port 8000` (no email subsystem since Batch H — nothing to isolate; scheduled reports just write in-app rows).
+3. Frontend: `cd frontend; npm run dev` → http://localhost:5173. (Or single-port: `npm run build` once, then backend alone serves http://localhost:8000.)
 4. Chat demo pacing: ≥30s between assistant questions (rate limit); 429 degrades gracefully but LLM prose is nicer.
-5. Real image generation: set `IMAGE_PROVIDER=seedream` in .env (user edit) or env var; ~¥0.2/张, ~25s/张; mock is the always-works fallback.
+5. Real image generation: set `IMAGE_PROVIDER=seedream` in .env (user edit) or env var; ~¥0.2/张, ~25s/张; mock is the always-works fallback. The live Render site's provider is set in its Environment panel.
 
-**Optional backlog (user picks, no order implied):** antd v6 deprecated-API sweep; route-level code splitting (2.4MB chunk); PPIO key rotation (Step 4.5 residue, user console action).
+**Optional backlog (user picks, no order implied):** route-level code splitting (2.4MB chunk); dual-mode try-on (segmentation+recolor third `ImageGenProvider` impl, README roadmap).
 
 ## 7. If you're not sure — ask, don't guess
 

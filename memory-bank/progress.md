@@ -2045,6 +2045,46 @@ benchmark 时发现原 `.env` 写的 model ID 在 PPIO 实际不可用 / 不合�
 
 ---
 
+### ✅ Batch H · 用户实测反馈六项修复 — 2026-09-13
+
+背景：Render 上线后用户首次完整试玩，提出 6 个问题（2026-09-12），全部判定为真问题并获用户逐项拍板：①占位 tab「显示与界面」删除、「AI 助手偏好」做成真功能；②O2「采纳建议」按钮语义不明；③日报/周报邮件发送失败 → 用户决定整体移除邮件功能，报告只留应用内历史；④核心试戴效果不可见 → 必须真实生成（Render 侧配置切 seedream）；⑤上传手图无校验；⑥运营端缺少返回用户端的入口。
+
+**做了什么：**
+- **邮件子系统整体移除**（③）：删除 `services/email.py`、`/reports/{id}/resend` 端点、`Report` 表 email_status/email_sent_at/email_error 三列、SMTP 全部配置项、前端 `reportStatus.ts` 与 RDetail/O7 的邮件状态 UI。报告管線简化为 aggregate → LLM → reports 行 + notifications 行（铃铛）。O7「通知与邮件订阅」tab 改名「报告中心」，只留生成按钮 + 历史表（新增统计周期列）。⚠️ schema 变更：拉取本次改动后需删 `nail_demo.db` 重新 seed。
+- **AI 助手偏好做真**（①）：新增 `aiPrefs.ts`（localStorage 持久化，公开站数据库每次冷启动重置，浏览器存储反而更持久）；O7 tab 提供模型档位（strong/quick）、Function Calling 开关、温度滑杆，改动即存即生效；ChatPanel 每次发送随请求携带 prefs，后端 `ChatPrefs` 钳制非法值。FC 关闭 = **快照模式**：后端预查 top/trending/cold 三组数据拼快照，单次补全作答，不产生工具调用、无法执行动作（回复会引导去开启 FC）——两种模式能力差异当场可对比。「显示与界面」占位 tab 删除。
+- **采纳建议可解释**（②）：O2 表格新增「AI 建议」列（规则引擎文案直接外显）；表格与抽屉的采纳按钮均加 Popconfirm，写明具体后果（display_order 置为全场最小、刷新即生效、写入审计）后才执行。
+- **上传手图 VLM 闸门**（⑤）：新增 `services/hand_gate.py` + `llm.gen_vision_text()`；用户上传先问 VLM"是否手部照片"，否 → 422 `not_a_hand_photo`，前端友好提示；样例图带 `is_sample=1` 跳过闸门保住 1s 快速通道。闸门 **fail-open**（超时/模型错误一律放行 + 记入 O7 降级流水）——校验挂掉不许挡真实用户。
+- **端切换**（⑥）：OpsLayout 侧栏底部新增「切换到用户端」按钮 → 一键回 `/`。
+- **附带修复**：SPA 入口 index.html 加 `Cache-Control: no-cache`（否则 Render 重部署后访客拿缓存旧入口引用已消失的 hash JS → 白屏）；O2 新列导致窄屏列压扁 → Table `scroll={{x:1120}}` 原位横向滚动；三个试戴 check 脚本补 `is_sample=1`。
+- **文档同步**：README（功能表/快速启动/技术决策表/在线体验注释）、docs/deploy.md、HANDOFF.md（部署状态修正 + SMTP 隔离仪式废除）、CLAUDE.md（"backend 尚不存在"等陈年过时段落全面修正）、.env.example。
+
+**Batch H 验证：**
+| 验证项 | 实测 |
+|---|---|
+| 手图闸门·非手图 | 422 not_a_hand_photo（5.0s，仪表盘截图被正确拒绝） |
+| 手图闸门·真手图 | 200 通过（2.2s）；样例跳闸门 1.8s；健康面板 vlm_gate 2 ok/0 fail |
+| 快照模式（FC off, quick, T=0.3） | rounds=0、components=0、2.3s，回复引用快照真实数据且正确拒绝执行动作并引导开 FC |
+| FC 模式对照 | 文字回复 + top_styles_table 组件正常 |
+| _check_report_service.py | 4/4 ALL PASS（daily/weekly/未知类型/LLM 失败回滚） |
+| _check_reports_api.py | 8/8 ALL PASS（含"响应无 email 字段"显式断言） |
+| O2 采纳链路 | 建议列外显 → Popconfirm 后果说明 → 确认 → 「已采纳」→ /api/styles smart 首位立即变为 f_15（闭环自证） |
+| O7 三 tab / RDetail | 占位 tab 消失；报告详情面板无邮件区块 |
+| 端切换 | 侧栏按钮一键回双端入口 |
+| 前端质量门 | tsc 0 错、eslint 0 错（U4 两条既有 warning）、生产构建通过 |
+
+**几个设计选择（透明告知）：**
+1. 偏好存 localStorage 而非数据库：公开站免费层磁盘临时、每冷启动重置，DB 持久化是假象；浏览器存储对访客反而真持久。后端做钳制兜底。
+2. 闸门 fail-open 而非 fail-closed：宁可漏拦一张桌子照，不可把真实用户挡在核心流程外；降级全部进 O7 健康面板（"降级不许安静"原则延续）。
+3. `VLM_MODEL` 默认 `qwen/qwen3-vl-235b-a22b-instruct`：data-prep 时代的 30B-MoE 已被 PPIO 下架（本批验证时靠 fail-open + 健康面板当场暴露，机制第一次实战立功）；235B instruct 为现存非思考 VL 型号，实测判别 3/3 正确、0.6-3.1s。thinking 类 VL（glm-4.1v-9b-thinking）会把 16 token 预算烧在推理上，不适合是/否闸门。
+4. 邮件移除是产品决策而非技术回避：公开 demo 让陌生访客触发发信到私人邮箱本就不合理；顺带消灭了"拔网线"隔离仪式这一整类操作风险。
+
+**给后续开发者的提示：**
+- 强推理档报告偶发连续两次空 content（PPIO 瞬时抖动，直探正常）；代码已有 retry-once，再遇到先重跑而不是改代码
+- index.html 此前无缓存头：老访客浏览器里可能还压着旧入口缓存，no-cache 头只对"这次之后"的响应生效，遇到诡异白屏让访客强刷一次即可
+- Render 侧让访客看到真实试戴：Environment → `IMAGE_PROVIDER=seedream`（quota 由 `SEEDREAM_DAILY_QUOTA` 封顶）
+
+---
+
 ### 📌 项目锁定状态 + 公约提醒（无需每步更新，状态真变才改）
 
 > 本段是**稳定的锁定状态指针**，不是 step-by-step 的进度条。

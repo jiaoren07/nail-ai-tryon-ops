@@ -77,7 +77,7 @@ cd /opt/nail/backend
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 
-# .env（把 <> 换成真实值；SMTP 五项可留空 = 邮件仅标记失败）
+# .env（把 <> 换成真实值）
 cp .env.example .env
 nano .env
 #   PPIO_API_KEY=<你的 key>

@@ -16,9 +16,11 @@ Identical copies live in `memory-bank/` plus two empty placeholders (`progress.m
 
 ## Current build state vs. plan
 
-The planning docs prescribe **React + Vite + FastAPI + SQLite + monorepo (`backend/` + `frontend/`)**. The product code (`backend/` + `frontend/`) does not exist yet — Phase 0 of `implementation-plan.md` builds it.
+**The build is COMPLETE**: all 55 plan steps + closing checklist + maintenance batches are done. `backend/` (FastAPI + SQLite + APScheduler) and `frontend/` (React 18 + Vite + antd + Tailwind) are the product code. The repo is public (https://github.com/jiaoren07/nail-ai-tryon-ops) with a live Render deployment (https://nail-ai-tryon-ops.onrender.com). **Read `HANDOFF.md` first for current state, workflow rules, and locked decisions** — this section only corrects the historical framing below.
 
-What does exist:
+Notable post-plan changes: single-origin deployment mode (backend serves `frontend/dist`), seed assets moved in-repo under `assets/dataset/`, and the **email subsystem was removed entirely** (Batch H, 2026-09-13 — reports are in-app only: O7 报告中心 history + bell notifications; there are no SMTP settings anywhere).
+
+Also in the repo:
 
 - `data-prep/` — one-off Python utilities for contest dataset preparation. **Not product code**, isolated from `backend/`:
   - `download_dataset.py` reads the contest xlsx and pulls 63 images (13 hand + 25×2 style) to `d:\美团AI HACKATHON\dataset\`. Already run; safe to re-run (idempotent).
@@ -29,26 +31,24 @@ What does exist:
 
 ## External data and resources
 
-- Dataset: `d:\美团AI HACKATHON\dataset\` (outside repo). Contents:
+- Dataset: `assets/dataset/` (in-repo since the public-portfolio migration; the original external copy at `d:\美团AI HACKATHON\dataset\` is no longer referenced by code). Contents:
   - `hands/01.png ~ 17.png` — 17 hand samples (13 from contest, 4 user-added). Shared by both genders; no gender split.
   - `styles/f_01_enh.png ~ f_25_enh.png` + `f_NN_orig.{png|jpg}` — 25 female styles from contest, all keyed `f_*`.
   - `styles/tags_qwen.json` — Qwen2.5-VL-72B tags for the 25 female styles (keys `f_NN_enh.png`).
   - `styles/male/m_01.jpg ~ m_15.jpg` — 15 male styles (user-added). No `_orig`/`_enh` distinction since these were not enhanced.
   - `styles/male/tags_qwen.json` — Qwen3-VL-30B-MoE tags for the 15 male styles (keys `m_NN.jpg`). The 72B model was 429-blocked at the time so we fell back to the 30B MoE variant.
   - Female 25 has 0 cool-tone styles and 1 short-length style; the male 15 supplies 7 cool + 9 short, making the overall recommendation pool well-balanced. Do not regenerate styles with image-gen APIs.
-- `.env` (gitignored) at repo root holds `PPIO_API_KEY` / `PPIO_BASE_URL`. PPIO is the single LLM/VLM supplier — no dashscope, no direct OpenAI. Future backend should add `LLM_QUICK_MODEL`, `LLM_STRONG_MODEL`, `JIMENG_API_KEY`, and SMTP keys per `tech-stack.md §7.3`.
+- `backend/.env` (gitignored; schema in `backend/.env.example`) holds `PPIO_API_KEY` / `PPIO_BASE_URL` plus `LLM_QUICK_MODEL` / `LLM_STRONG_MODEL` / `VLM_MODEL` / `IMAGE_PROVIDER` / scheduler+quota guards. PPIO is the single LLM/VLM/image supplier — no dashscope, no direct OpenAI. The user edits `.env` themselves; never print or copy its secrets.
 
 ## Commands
 
-Currently no backend or test suite exists. Available commands operate on the two existing surfaces:
+**Product app** (see README 快速启动 for the full first-run sequence):
+- Seed / reset demo data: `cd backend; .venv\Scripts\python.exe -X utf8 scripts\seed_all.py` (idempotent; rerun before demos and before any `_check_*_api.py`)
+- Backend: `cd backend; .venv\Scripts\python.exe -m uvicorn app.main:app --port 8000`
+- Frontend dev: `cd frontend; npm run dev` → http://localhost:5173 (`npm run build` then backend-only :8000 = single-port deployment mode; `npm run lint`, `npx tsc -b` for checks)
+- Verification scripts: `backend/scripts/_check_*.py` — underscore-prefixed on purpose (not pytest targets), each prints `ALL PASS`
 
-**Next.js prototype** (run from `Meijia/`):
-- `npm run dev` — dev server at `http://localhost:3000`
-- `npm run build` / `npm run start` — production build & serve
-- Or double-click `Meijia/start-dev.bat` on Windows
-- Note: `package.json` scripts use `set NEXT_TELEMETRY_DISABLED=1` cmd-style syntax. Works in PowerShell because `set X=Y && cmd` is interpreted by the shell that npm spawns, but if you edit the scripts use PowerShell-safe forms.
-
-**Dataset / tagging scripts** (run from repo root, all live in `data-prep/`):
+**Dataset / tagging scripts** (run from repo root, all live in `data-prep/`; one-off, already run):
 - `python data-prep/download_dataset.py` — idempotent, skips already-downloaded files
 - `python data-prep/auto_tag_styles.py` — idempotent, only re-tags entries whose status ≠ `ok` in `tags_{label}.json`. GLM-Thinking branch can take 30–60s per image; cancel and re-run is safe.
 - Both require `httpx`, `openpyxl`, `openai`, `python-dotenv`, `pillow` in the active Python env. Use `python -X utf8` with `$env:PYTHONIOENCODING="utf-8"` when CJK paths are involved (PowerShell mojibakes them otherwise).
@@ -61,7 +61,7 @@ Read this so you don't have to reverse-engineer it from the planning docs:
 
 **AI services are strictly cloud APIs:** No local model serving. The image-gen Provider is abstracted (`ImageGenProvider`) so the demo can fall back to `MockProvider` that copies the enhanced style image as the "try-on result" — this is the safety net for offline / API-down scenarios and must always work.
 
-**Scheduler is in-process:** APScheduler runs inside the FastAPI process (no Celery, no Redis). Daily report 09:00, weekly Monday 09:00. Manual trigger (`POST /api/ops/reports/generate`) executes the **same function** with `trigger_source="manual"`. Both paths write `reports` row → `notifications` row → async email send. Bell badge polls `/api/ops/notifications/unread-count` every 5s.
+**Scheduler is in-process:** APScheduler runs inside the FastAPI process (no Celery, no Redis). Daily report 09:00, weekly Monday 09:00, all triggers explicitly `Asia/Shanghai`. Manual trigger (`POST /api/ops/reports/generate`) executes the **same function** with `trigger_source="manual"`. Both paths write `reports` row → `notifications` row (in-app only — email was removed in Batch H). Bell badge polls `/api/ops/notifications/unread-count` every 5s.
 
 **Recommendation has gender as a hard pre-filter,** then 4-dim scoring (skin 35% / hand 30% / heat 20% / diversity 15%) within that pool. LLM only generates the per-card reason text; it does not pick which styles to show.
 
@@ -71,7 +71,7 @@ Read this so you don't have to reverse-engineer it from the planning docs:
 
 - **Plan-first culture is intentional.** The user has put thought into design-docu / tech-stack / implementation-plan. If a request implies deviating from them, surface the conflict explicitly rather than silently doing something different. Update the docs in lockstep when the design actually changes.
 - **Step-by-step plan is the source of truth for build order.** When implementing, follow `implementation-plan.md` step IDs (e.g. "Step 4.5"). Each step's "验证" block is the definition of done — do not mark a step done until you can demonstrate the verification.
-- **Step-completion gate is human-in-the-loop, not automated-only.** For every implementation-plan step: (1) implement, (2) run automated verification, (3) **present results to the user and explicitly wait for confirmation** ("OK" / "通过" / "下一步"), (4) only then write the progress.md entry + git commit, (5) only then move on. Do not auto-advance even when all automated checks pass — the user reviews real outputs (UI screenshots, generated images, behavioural traces) that automated verification can't fully cover. If verification fails, fix and re-present (don't ask the user to OK failed work). Pure cleanup actions with zero product impact (deleting test residue, renaming files) can be chained, but still show the diff before committing.
+- **Step-completion gate is human-in-the-loop, not automated-only.** Since 2026-08-27 this runs in **batch mode** (user-approved, see HANDOFF §2): low-risk steps are implemented + auto-verified + committed as a batch, with **one user review gate at batch end**; concentrated-risk items (destructive ops, secrets, new dependencies, plan deviations, visual/AI-quality judgments) still stop individually. The user reviews real outputs (UI screenshots, generated images, behavioural traces) that automated verification can't fully cover. If verification fails, fix and re-present — don't ask the user to OK failed work.
 - **Every step report ends with a "手动验证方法" section** — copy-pasteable command + what "通过" looks like. Don't wait for the user to ask. From Step 5 onward, one primary path (auto script → `ALL PASS`) is enough; add secondary paths only when they carry demo value or the primary is fragile.
 - **Reseed before verifying time-window interfaces.** `python backend/scripts/seed_all.py` anchors the spike data to seed-time "today". Rules based on rolling windows (Step 6.2 trending 24h / 6.3 cold 7d / 6.1 overview today-vs-yesterday) drift out of range after a few hours. Run seed_all immediately before every `_check_*_api.py` for the ops-side APIs.
 - **Handoff protocol.** Continuation of this project by any new AI agent (Codex, next Claude session, etc.) starts by reading `HANDOFF.md` at repo root, which consolidates workflow rules + current build state + locked decisions + known gotchas that history-only files (progress.md tail) don't spell out. `AGENTS.md` is the auto-loaded entry file for Codex CLI / VSCode Codex extension.
