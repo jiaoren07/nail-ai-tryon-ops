@@ -21,6 +21,8 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+from PIL import Image
+
 HERE = Path(__file__).resolve().parent
 BACKEND_ROOT = HERE.parent
 sys.path.insert(0, str(BACKEND_ROOT))
@@ -104,19 +106,41 @@ def _build_rows() -> list[Style]:
 
 
 def _copy_static() -> dict[str, int]:
-    counts = {"female": 0, "male": 0, "samples": 0}
+    counts = {"female": 0, "male": 0, "samples": 0, "nail_crops": 0}
     STATIC_STYLES.mkdir(parents=True, exist_ok=True)
     STATIC_SAMPLES.mkdir(parents=True, exist_ok=True)
 
+    covers: dict[str, Path] = {}
     for png in sorted(FEMALE_DIR.glob("f_*_enh.png")):
         shutil.copyfile(png, STATIC_STYLES / png.name)
+        covers[png.name.removesuffix("_enh.png")] = png
         counts["female"] += 1
     for jpg in sorted(MALE_DIR.glob("m_*.jpg")):
         shutil.copyfile(jpg, STATIC_STYLES / jpg.name)
+        covers[jpg.name.removesuffix(".jpg")] = jpg
         counts["male"] += 1
     for png in sorted(HANDS_DIR.glob("[0-9][0-9].png")):
         shutil.copyfile(png, STATIC_SAMPLES / png.name)
         counts["samples"] += 1
+
+    # Batch I: nail close-up reference crops for Seedream. Full-hand covers
+    # with a strong composition made the model copy the COVER's hand/pose/
+    # background instead of the user's photo (reproduced on f_21); a crop
+    # holding only the nail region removes that copyable signal. Bboxes were
+    # VLM-annotated once + human-reviewed (scripts/annotate_nail_bboxes.py);
+    # styles absent from the JSON simply keep using the full cover.
+    bbox_file = DATASET_DIR / "nail_bboxes.json"
+    if bbox_file.exists():
+        bboxes: dict[str, list[float]] = json.loads(bbox_file.read_text(encoding="utf-8"))
+        for sid, (x0, y0, x1, y1) in bboxes.items():
+            src = covers.get(sid)
+            if src is None:
+                continue
+            img = Image.open(src).convert("RGB")
+            w, h = img.size
+            crop = img.crop((int(x0 * w), int(y0 * h), int(x1 * w), int(y1 * h)))
+            crop.save(STATIC_STYLES / f"{sid}_nail.jpg", quality=90)
+            counts["nail_crops"] += 1
     return counts
 
 
@@ -133,7 +157,11 @@ async def _main() -> None:
     inserted = await seed_styles()
     counts = _copy_static()
     print(f"styles inserted: {inserted}")
-    print(f"static files copied: female={counts['female']} male={counts['male']} samples={counts['samples']}")
+    print(
+        "static files copied: "
+        f"female={counts['female']} male={counts['male']} "
+        f"samples={counts['samples']} nail_crops={counts['nail_crops']}"
+    )
     await engine.dispose()
 
 

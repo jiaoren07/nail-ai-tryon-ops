@@ -67,6 +67,23 @@ def _resolve_cover_path(style_id: str) -> Path | None:
     return None
 
 
+def _resolve_style_ref_path(style_id: str) -> Path | None:
+    """Reference image fed to Seedream as the DESIGN source.
+
+    Batch I (2026-09-13): prefer the nail close-up crop
+    (`{sid}_nail.jpg`, built by seed_styles.py from human-reviewed VLM
+    bboxes). Full-hand covers with a strong composition made Seedream
+    copy the cover's hand/pose/background wholesale, discarding the
+    user's photo (reproduced on f_21); a nails-only crop removes that
+    copyable signal. Styles without a crop fall back to the full cover —
+    no worse than the pre-Batch-I behavior.
+    """
+    crop = STATIC_STYLES / f"{style_id}_nail.jpg"
+    if crop.exists():
+        return crop
+    return _resolve_cover_path(style_id)
+
+
 def _bytes_to_data_url(raw: bytes, fallback_mime: str = "png") -> str:
     """Sniff PNG/JPEG magic bytes and wrap as a data: URL."""
     if raw[:8] == b"\x89PNG\r\n\x1a\n":
@@ -121,15 +138,19 @@ class SeedreamProvider(ImageGenProvider):
     - Model: seedream-4.5 (best skin-tone fidelity among PPIO's image
       catalog; 4.0 over-darkens, 5.0-lite rejects darker hands, Qwen-Image
       edit only accepts a single image).
-    - Prompt: V1 short version (V2 expanded version showed no observable
-      improvement in the benchmark; the additional constraints did not
-      change model output meaningfully).
+    - Prompt: V3 edit-task phrasing (Batch I, 2026-09-13, user-accepted).
+      V1's "保持与第一张图一致" wording could not stop the model from
+      copying a strong-composition cover wholesale; the fix that actually
+      worked is feeding a nail-crop reference (_resolve_style_ref_path),
+      and V3 additionally frames the task as editing image 1 with image 2
+      as material only — in the promptlab A/B it placed design elements
+      (the f_21 gem) on the nail instead of the hand.
     - size: "2K" (demo display target is well under 4K).
     - watermark: false (we're presenting these as "your try-on", not
       external content that needs source attribution).
 
     Cost: ~¥0.2 per call on PPIO at time of writing.
-    Typical latency: 40-60 seconds.
+    Typical latency: 25-60 seconds.
     """
 
     ENDPOINT = "https://api.ppio.com/v3/seedream-4.5"
@@ -137,9 +158,14 @@ class SeedreamProvider(ImageGenProvider):
     DOWNLOAD_TIMEOUT = 60
 
     PROMPT_TEMPLATE = (
-        "将第一张图中手的指甲外观替换为第二张图所示的美甲款式设计。"
-        "保持手的肤色、形状、姿势和背景与第一张图完全一致，"
-        "仅改变指甲表面的颜色与图案。结果要写实、自然，不要卡通化。"
+        "图像编辑任务：以第一张图为底图，输出它的编辑版本。\n"
+        "必须保持与第一张图完全一致：同一只手、同样的肤色、手型、手指姿势、"
+        "拍摄角度、背景和光线。\n"
+        "唯一允许的改动：把第一张图里的指甲涂装，替换为第二张图所示美甲款式的设计"
+        "（颜色、渐变、图案、贴饰、法式边）。\n"
+        "第二张图只是美甲设计的素材参考；严禁照搬第二张图中的手、姿势、背景或构图，"
+        "第二张图中除指甲设计外的一切信息都必须忽略。\n"
+        "新指甲的形状与长度贴合第一张图原有的指甲。结果写实自然，不要卡通化。"
     )
 
     async def generate(
@@ -153,12 +179,12 @@ class SeedreamProvider(ImageGenProvider):
             raise ImageGenError(
                 "PPIO_API_KEY missing — set it in backend/.env to use SeedreamProvider"
             )
-        cover = _resolve_cover_path(style_id)
-        if cover is None:
+        style_ref = _resolve_style_ref_path(style_id)
+        if style_ref is None:
             raise ImageGenError(f"no cover image found for style {style_id!r}")
 
         hand_url = _bytes_to_data_url(hand_image_bytes, "png")
-        style_url = _file_to_data_url(cover)
+        style_url = _file_to_data_url(style_ref)
         prompt = self.PROMPT_TEMPLATE
         if prompt_extra:
             prompt = f"{prompt}\n\n{prompt_extra}"
