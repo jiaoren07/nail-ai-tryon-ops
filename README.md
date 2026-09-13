@@ -80,6 +80,7 @@ React 18 + Vite + TypeScript + antd + Tailwind + ECharts ｜ FastAPI + SQLAlchem
 | 定时任务时区 | 所有 CronTrigger 显式 `Asia/Shanghai`，UTC 主机不会晚 8 小时 | progress.md Batch C |
 | 演示数据可复现 | seed 严格幂等（固定随机种子），删库重建后全链路可用；热度分从种子行为量推导而非拍脑袋 | scripts/seed_all.py |
 | 降级不许安静 | 换模型后一个写死的超时曾让推荐理由 100% 静默回落模板、潜伏数日——修复后所有降级记入服务健康面板（O7）+ WARNING 日志 | services/health_stats.py |
+| 生成式试戴被款式封面"带跑" | 封面本身是强构图手部照片时，模型会照搬封面的手势/背景而丢弃用户手图（文字约束加到"严禁照搬"也拦不住）；根治 = 参考图改喂**指甲特写裁剪**（VLM 标 bbox + 人工逐张复核，seed 时毫秒级现裁）+ 编辑式提示词；裁不干净的 6 款自动回退原封面 | progress.md Batch I |
 
 ## AI 协作开发过程
 
