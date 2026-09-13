@@ -4,6 +4,7 @@ import imageCompression from "browser-image-compression";
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import api from "../../api/client";
+import SideSwitch from "../../components/SideSwitch";
 import { useUser } from "../../store/useUser";
 
 /**
@@ -126,6 +127,7 @@ export default function U1() {
         <span className="text-xs text-ink-muted">
           当前性别：{userGender === "female" ? "女性" : "男性"}
         </span>
+        <SideSwitch />
       </header>
 
       {/* === Main === */}

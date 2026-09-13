@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import api from "../../api/client";
 import { absUrl } from "../../utils/url";
+import SideSwitch from "../../components/SideSwitch";
 import { useUser } from "../../store/useUser";
 
 /**
@@ -224,6 +225,7 @@ export default function U3() {
             { label: "男款", value: "male" },
           ]}
         />
+        <SideSwitch />
       </header>
 
       {/* === Filter bar === */}

@@ -1,5 +1,6 @@
 import { Link, useNavigate } from "react-router-dom";
 import { type Gender } from "../../store/UserContext";
+import SideSwitch from "../../components/SideSwitch";
 import { useUser } from "../../store/useUser";
 import { absUrl } from "../../utils/url";
 
@@ -46,6 +47,7 @@ export default function U0() {
         >
           跳过
         </button>
+        <SideSwitch />
       </header>
 
       {/* === Main === */}

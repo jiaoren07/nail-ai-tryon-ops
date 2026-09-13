@@ -4,6 +4,7 @@ import dayjs from "dayjs";
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import api from "../../api/client";
+import SideSwitch from "../../components/SideSwitch";
 import { absUrl } from "../../utils/url";
 
 /**
@@ -93,17 +94,20 @@ export default function U6() {
               <h1 className="mt-1.5 text-xl font-semibold text-ink">试戴历史与收藏</h1>
             </div>
           </div>
-          <Segmented
-            value={filter}
-            onChange={(value) => {
-              setLoading(true);
-              setFilter(value as "all" | "collected");
-            }}
-            options={[
-              { label: "全部", value: "all" },
-              { label: "已收藏", value: "collected" },
-            ]}
-          />
+          <div className="flex items-center gap-3">
+            <Segmented
+              value={filter}
+              onChange={(value) => {
+                setLoading(true);
+                setFilter(value as "all" | "collected");
+              }}
+              options={[
+                { label: "全部", value: "all" },
+                { label: "已收藏", value: "collected" },
+              ]}
+            />
+            <SideSwitch />
+          </div>
         </div>
 
         {error && (

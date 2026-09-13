@@ -5,6 +5,7 @@ import ReactCompareImage from "react-compare-image";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import api from "../../api/client";
 import { absUrl } from "../../utils/url";
+import SideSwitch from "../../components/SideSwitch";
 import { useUser } from "../../store/useUser";
 
 /**
@@ -261,6 +262,7 @@ export default function U5() {
             </span>
           )}
         </div>
+        <SideSwitch />
       </header>
 
       <main className="flex-1 px-6 py-6">

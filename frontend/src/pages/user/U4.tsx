@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import api from "../../api/client";
 import { absUrl } from "../../utils/url";
+import SideSwitch from "../../components/SideSwitch";
 import { useUser } from "../../store/useUser";
 
 /**
@@ -220,6 +221,7 @@ export default function U4() {
         >
           清空对比
         </button>
+        <SideSwitch />
       </header>
 
       {/* === Truncation notice === */}

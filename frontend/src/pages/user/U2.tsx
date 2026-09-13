@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import api from "../../api/client";
 import { absUrl } from "../../utils/url";
+import SideSwitch from "../../components/SideSwitch";
 import { useUser } from "../../store/useUser";
 
 /**
@@ -164,6 +165,7 @@ export default function U2() {
           </span>
           <span className="text-sm font-medium text-ink">智能推荐</span>
         </div>
+        <SideSwitch />
       </header>
 
       {/* === User-summary card === */}
