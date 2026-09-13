@@ -167,6 +167,11 @@ if FRONTEND_DIST.exists():
         name="fe-assets",
     )
 
+    # The SPA entry must never be cached: hashed /assets/* change name on
+    # every build, so a cached index.html would reference JS that no
+    # longer exists after a redeploy (blank page until a hard refresh).
+    _NO_CACHE = {"Cache-Control": "no-cache"}
+
     @app.get("/{full_path:path}", include_in_schema=False)
     async def spa_fallback(full_path: str):
         """Serve index.html for every non-API, non-static path so React
@@ -174,5 +179,6 @@ if FRONTEND_DIST.exists():
         refresh. Registered LAST — API routes and /static win first."""
         candidate = FRONTEND_DIST / full_path
         if full_path and candidate.is_file():
-            return FileResponse(candidate)
-        return FileResponse(FRONTEND_DIST / "index.html")
+            headers = _NO_CACHE if candidate.name == "index.html" else None
+            return FileResponse(candidate, headers=headers)
+        return FileResponse(FRONTEND_DIST / "index.html", headers=_NO_CACHE)
