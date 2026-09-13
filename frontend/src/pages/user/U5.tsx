@@ -15,12 +15,12 @@ import { useUser } from "../../store/useUser";
  *   2. GET /api/tryon/:id (F5 fallback, deep-link survival)
  *   3. Error placeholder if both fail
  *
- * Operations bar (5 buttons per plan §5.8):
+ * Operations bar (plan §5.8 had 5 buttons; 找店预约 placeholder removed
+ * in Batch I — user call, dead "即将上线" buttons read as unfinished):
  *   - 保存:        canvas.toBlob() download of the result image
  *   - 分享:        copy current page URL to clipboard
  *   - 收藏:        POST /api/events/collect (atomic, idempotent)
  *   - 换一款再试:   navigate /recommend
- *   - 找店预约:    placeholder toast
  */
 interface TryonDetail {
   tryon_id: number;
@@ -182,10 +182,6 @@ export default function U5() {
     }
   }
 
-  function onFindStore() {
-    message.info("即将上线：找店预约功能（demo 占位）");
-  }
-
   function onRetry() {
     navigate("/recommend");
   }
@@ -319,8 +315,9 @@ export default function U5() {
             </div>
           </div>
 
-          {/* Actions */}
-          <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+          {/* Actions (Batch I: 找店预约 placeholder removed — dead "即将上线"
+              buttons read as unfinished work, same call as the O7 tab) */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             <ActionButton
               onClick={onSave}
               disabled={saving}
@@ -343,11 +340,6 @@ export default function U5() {
               onClick={onRetry}
               label="换一款"
               hint="再试别的"
-            />
-            <ActionButton
-              onClick={onFindStore}
-              label="找店预约"
-              hint="即将上线"
             />
           </div>
         </div>
