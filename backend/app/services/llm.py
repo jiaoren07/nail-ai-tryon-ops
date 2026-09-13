@@ -129,15 +129,21 @@ async def gen_text_with_tools(
     messages: Sequence[dict],
     tools: Sequence[dict],
     model: Tier = "strong",
+    temperature: float | None = None,
 ) -> Any:
     """Function-Calling style chat. Returns the assistant Message object,
     which has `.content` (text) and `.tool_calls` (list or None).
+
+    `model` / `temperature` are operator-tunable via O7 AI 助手偏好
+    (Batch H); None temperature keeps the provider default.
     """
     client = _client()
     model_id = _model_id(model)
 
     async def _call():
         kwargs: dict[str, Any] = {"model": model_id, "messages": list(messages)}
+        if temperature is not None:
+            kwargs["temperature"] = temperature
         # Empty tools -> omit the params entirely: some OpenAI-compatible
         # backends 400 on tools=[] (used by the chat loop's forced final
         # text-only call when tool rounds are exhausted).
@@ -153,3 +159,40 @@ async def gen_text_with_tools(
         raise
     health_stats.record_call(f"llm_{model}", ok=True)
     return resp.choices[0].message
+
+
+async def gen_vision_text(
+    prompt: str,
+    image_data_url: str,
+    model_id: str,
+    max_tokens: int = 16,
+) -> str:
+    """Single-image VLM completion (Batch H: the U1 hand-photo gate).
+
+    Takes a ready `data:` URL — the caller owns downscaling (the gate
+    shrinks to 768px JPEG so latency stays in the 2-4s band). Shares the
+    singleton client and the 429-retry policy with the text tiers.
+    """
+    client = _client()
+
+    async def _call():
+        return await client.chat.completions.create(
+            model=model_id,
+            messages=[{
+                "role": "user",
+                "content": [
+                    {"type": "image_url", "image_url": {"url": image_data_url}},
+                    {"type": "text", "text": prompt},
+                ],
+            }],
+            max_tokens=max_tokens,
+            temperature=0,
+        )
+
+    try:
+        resp = await _with_retry(_call)
+    except Exception as e:
+        health_stats.record_call("vlm_gate", ok=False, reason=str(e))
+        raise
+    health_stats.record_call("vlm_gate", ok=True)
+    return (resp.choices[0].message.content or "").strip()

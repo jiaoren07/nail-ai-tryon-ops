@@ -1,7 +1,7 @@
 import {
   FileTextOutlined,
-  MailOutlined,
   ReloadOutlined,
+  RobotOutlined,
   SettingOutlined,
 } from "@ant-design/icons";
 import {
@@ -9,9 +9,9 @@ import {
   App as AntApp,
   Button,
   Card,
-  Checkbox,
   Empty,
-  Input,
+  Radio,
+  Slider,
   Switch,
   Table,
   Tabs,
@@ -23,7 +23,8 @@ import dayjs from "dayjs";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import api from "../../api/client";
-import { EMAIL_STATUS_TAG } from "./reportStatus";
+import type { AiPrefs } from "./aiPrefs";
+import { loadAiPrefs, saveAiPrefs } from "./aiPrefs";
 
 interface ReportItem {
   id: number;
@@ -32,7 +33,6 @@ interface ReportItem {
   period_start: string;
   period_end: string;
   trigger_source: string;
-  email_status: "pending" | "sent" | "failed";
   generated_at: string | null;
 }
 
@@ -40,26 +40,6 @@ interface ApiEnvelope<T> {
   code: number;
   msg: string;
   data: T;
-}
-
-/** Subscription prefs are front-end only per design-docu §7.7.6 —
- * localStorage, NOT the backend REPORT_RECIPIENT (that's the fallback). */
-const SUBSCRIPTION_KEY = "ops_email_subscription";
-
-interface Subscription {
-  enabled: boolean;
-  email: string;
-  frequencies: string[];
-}
-
-function loadSubscription(): Subscription {
-  try {
-    const raw = localStorage.getItem(SUBSCRIPTION_KEY);
-    if (raw) return JSON.parse(raw) as Subscription;
-  } catch {
-    // corrupted storage -> defaults
-  }
-  return { enabled: true, email: "", frequencies: ["daily", "weekly"] };
 }
 
 interface HealthService {
@@ -86,13 +66,14 @@ const SERVICE_LABEL: Record<string, string> = {
   llm_quick: "LLM 轻量档",
   llm_strong: "LLM 强推理档",
   image_gen: "图像生成",
-  email: "邮件发送",
+  vlm_gate: "手图识别 (VLM)",
 };
 
 const DEGRADATION_LABEL: Record<string, string> = {
   recommend_reasons: "推荐理由 → 模板降级",
   ops_chat: "AI 助手 → 数据摘要降级",
   image_gen_quota: "生图额度耗尽 → Mock 降级",
+  hand_gate: "手图校验不可用 → 放行",
 };
 
 function formatUptime(seconds: number): string {
@@ -251,58 +232,83 @@ function AccountHealthSection() {
   );
 }
 
-function SubscriptionSection() {
+/** Batch H: real assistant preferences (was a placeholder). Saved to
+ * localStorage on every change and sent with each /api/ops/chat request
+ * — the backend clamps and applies them, so the toggle is genuinely
+ * behavior-changing, not cosmetic. */
+function AiPrefsSection() {
   const { message } = AntApp.useApp();
-  const [sub, setSub] = useState<Subscription>(() => loadSubscription());
+  const [prefs, setPrefs] = useState<AiPrefs>(() => loadAiPrefs());
 
-  const save = () => {
-    try {
-      localStorage.setItem(SUBSCRIPTION_KEY, JSON.stringify(sub));
-      message.success("订阅设置已保存（本地）");
-    } catch {
-      message.error("保存失败：浏览器存储不可用");
-    }
-  };
+  const apply = useCallback(
+    (next: AiPrefs) => {
+      setPrefs(next);
+      if (saveAiPrefs(next)) {
+        message.success("已保存，下一条对话起生效");
+      } else {
+        message.error("保存失败：浏览器存储不可用");
+      }
+    },
+    [message],
+  );
 
   return (
-    <div className="max-w-[560px]">
-      <div className="flex items-center gap-3">
-        <Switch
-          checked={sub.enabled}
-          onChange={(enabled) => setSub((s) => ({ ...s, enabled }))}
+    <div className="max-w-[640px] space-y-7">
+      <div>
+        <div className="text-sm font-semibold text-ink">模型档位</div>
+        <p className="mb-3 mt-1 text-xs text-ink-muted">
+          助手回答与工具调用使用的模型；强推理更稳、更全面，轻量档响应更快、成本更低
+        </p>
+        <Radio.Group
+          value={prefs.modelTier}
+          onChange={(e) => apply({ ...prefs, modelTier: e.target.value })}
+          options={[
+            { value: "strong", label: "强推理 · deepseek-v4-pro（默认）" },
+            { value: "quick", label: "轻量 · qwen3-235b-a22b" },
+          ]}
         />
-        <span className="text-sm font-medium text-ink">启用邮件订阅</span>
       </div>
 
-      <div className="mt-4 space-y-3">
-        <div>
-          <div className="mb-1 text-xs text-ink-secondary">收件邮箱</div>
-          <Input
-            placeholder="user@example.com"
-            value={sub.email}
-            disabled={!sub.enabled}
-            onChange={(e) => setSub((s) => ({ ...s, email: e.target.value }))}
+      <div>
+        <div className="flex items-center gap-3">
+          <Switch
+            checked={prefs.useFc}
+            onChange={(useFc) => apply({ ...prefs, useFc })}
           />
+          <span className="text-sm font-semibold text-ink">Function Calling</span>
+          <Tag variant="filled" color={prefs.useFc ? "purple" : "default"}>
+            {prefs.useFc ? "工具调用模式" : "快照模式"}
+          </Tag>
         </div>
-        <div>
-          <div className="mb-1 text-xs text-ink-secondary">订阅频率</div>
-          <Checkbox.Group
-            value={sub.frequencies}
-            disabled={!sub.enabled}
-            options={[
-              { label: "日报", value: "daily" },
-              { label: "周报", value: "weekly" },
-              { label: "关键事件实时", value: "events" },
-            ]}
-            onChange={(frequencies) =>
-              setSub((s) => ({ ...s, frequencies: frequencies as string[] }))
-            }
-          />
-        </div>
-        <Button type="primary" onClick={save}>
-          保存
-        </Button>
+        <p className="mt-2 text-xs leading-5 text-ink-muted">
+          开启：助手按需调用 5 个数据/动作工具，可执行推荐位调整、下架等运营动作（全程审计）。
+          <br />
+          关闭：助手仅基于系统预查的实时数据快照作答，不产生工具调用、无法执行动作——
+          可直观对比两种模式的能力差异。
+        </p>
       </div>
+
+      <div>
+        <div className="text-sm font-semibold text-ink">生成温度</div>
+        <p className="mb-1 mt-1 text-xs text-ink-muted">
+          低 = 输出更稳定一致，高 = 更发散有变化；对数据结论无影响（数字始终来自工具查询）
+        </p>
+        <div className="max-w-[420px]">
+          <Slider
+            min={0}
+            max={1}
+            step={0.1}
+            value={prefs.temperature}
+            marks={{ 0: "稳定", 0.7: "默认", 1: "发散" }}
+            onChange={(temperature) => setPrefs((p) => ({ ...p, temperature }))}
+            onChangeComplete={(temperature) => apply({ ...prefs, temperature })}
+          />
+        </div>
+      </div>
+
+      <p className="border-t border-line pt-4 text-xs text-ink-muted">
+        设置保存在本浏览器（不入库），发送对话时随请求生效；非法值由服务端自动钳制回安全范围。
+      </p>
     </div>
   );
 }
@@ -361,7 +367,7 @@ function ReportsSection() {
           throw new Error(response.data.msg || "generate_error");
         }
         message.success(
-          `${type === "daily" ? "日报" : "周报"}已生成（#${response.data.data.report_id}），邮件投递中`,
+          `${type === "daily" ? "日报" : "周报"}已生成（#${response.data.data.report_id}），点击行内查看`,
         );
         setLoading(true);
         setReloadToken((k) => k + 1);
@@ -407,6 +413,15 @@ function ReportsSection() {
         ),
       },
       {
+        title: "统计周期",
+        key: "period",
+        width: 200,
+        render: (_, item) =>
+          item.period_start === item.period_end
+            ? item.period_start
+            : `${item.period_start} ~ ${item.period_end}`,
+      },
+      {
         title: "触发",
         key: "source",
         width: 90,
@@ -420,29 +435,21 @@ function ReportsSection() {
         render: (_, item) =>
           item.generated_at ? dayjs(item.generated_at).format("MM-DD HH:mm") : "-",
       },
-      {
-        title: "邮件状态",
-        key: "email",
-        width: 110,
-        render: (_, item) => {
-          const meta = EMAIL_STATUS_TAG[item.email_status];
-          return (
-            <Tag variant="filled" color={meta.color}>
-              {meta.label}
-            </Tag>
-          );
-        },
-      },
     ],
     [],
   );
 
   return (
-    <div className="mt-8 border-t border-line pt-6">
+    <div>
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-        <div className="text-base font-semibold text-ink">
-          <FileTextOutlined className="mr-2" />
-          最近 10 份报告
+        <div>
+          <div className="text-base font-semibold text-ink">
+            <FileTextOutlined className="mr-2" />
+            最近 10 份报告
+          </div>
+          <p className="mt-1 text-xs text-ink-muted">
+            定时（每日 09:00 / 周一 09:00）与手动生成的 LLM 报告都会存入历史并推送到右上角铃铛
+          </p>
         </div>
         <div className="flex items-center gap-2">
           <Button
@@ -507,13 +514,13 @@ export default function O7Setting() {
         </div>
         <h1 className="mt-3 text-2xl font-semibold text-ink">设置中心</h1>
         <p className="mt-1 text-sm text-ink-secondary">
-          报告订阅、通知偏好与工作台配置；独立报告中心已并入「通知与邮件订阅」
+          报告生成与历史、AI 助手偏好、服务健康状态
         </p>
       </div>
 
       <Card className="border-line shadow-sm">
         <Tabs
-          defaultActiveKey="notify"
+          defaultActiveKey="reports"
           items={[
             {
               key: "account",
@@ -521,37 +528,24 @@ export default function O7Setting() {
               children: <AccountHealthSection />,
             },
             {
-              key: "notify",
+              key: "reports",
               label: (
                 <span>
-                  <MailOutlined className="mr-1" />
-                  通知与邮件订阅
+                  <FileTextOutlined className="mr-1" />
+                  报告中心
                 </span>
               ),
-              children: (
-                <div>
-                  <SubscriptionSection />
-                  <ReportsSection />
-                </div>
-              ),
+              children: <ReportsSection />,
             },
             {
               key: "ai",
-              label: "AI 助手偏好",
-              children: (
-                <div className="py-10 text-center text-sm text-ink-muted">
-                  模型档位、Function Calling 开关与生成温度（本期占位）
-                </div>
+              label: (
+                <span>
+                  <RobotOutlined className="mr-1" />
+                  AI 助手偏好
+                </span>
               ),
-            },
-            {
-              key: "display",
-              label: "显示与界面",
-              children: (
-                <div className="py-10 text-center text-sm text-ink-muted">
-                  主题切换、紧凑模式与图表偏好（本期占位）
-                </div>
-              ),
+              children: <AiPrefsSection />,
             },
           ]}
         />

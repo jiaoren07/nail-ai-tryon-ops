@@ -46,7 +46,7 @@ export default function App() {
               />
               <Route path="trending" element={<O2Trending />} />
               <Route path="cold" element={<O3Cold />} />
-              {/* 独立报告中心已并入 O7「通知与邮件订阅」tab（design §7.7）；
+              {/* 独立报告中心已并入 O7「报告中心」tab（design §7.7）；
                   旧路径重定向而非 404，避免历史书签/通知死链 */}
               <Route path="report" element={<Navigate to="/ops/setting" replace />} />
               <Route path="chat" element={<O5Chat />} />

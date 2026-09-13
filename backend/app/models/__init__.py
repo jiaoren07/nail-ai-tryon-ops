@@ -101,9 +101,10 @@ class Report(Base):
     period_start: Mapped[date]
     period_end: Mapped[date]
     trigger_source: Mapped[str]
-    email_status: Mapped[str] = mapped_column(default="pending")
-    email_sent_at: Mapped[datetime | None] = mapped_column(default=None)
-    email_error: Mapped[str | None] = mapped_column(Text, default=None)
+    # Batch H (2026-09-12): email delivery removed product-wide — reports
+    # are in-app only (history list + bell notification). The email_status/
+    # email_sent_at/email_error columns are gone; recreate the demo DB
+    # (delete nail_demo.db + seed_all) after pulling this change.
     generated_at: Mapped[datetime] = mapped_column(server_default=func.current_timestamp())
 
 

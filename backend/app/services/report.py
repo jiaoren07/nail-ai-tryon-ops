@@ -6,12 +6,11 @@ One function, three entry points (design-docu §7.7.3): APScheduler cron
 `generate_and_dispatch_report(report_type, trigger_source)`.
 
 Pipeline: aggregate stats -> strong-tier LLM markdown (§7.4 prompts) ->
-insert `reports` -> insert `notifications` -> fire-and-forget email task
--> email task updates email_status to sent/failed.
+insert `reports` -> insert `notifications` (bell badge). Batch H
+(2026-09-12) removed the email leg entirely: reports are in-app only,
+read from the O7 report history + notification bell.
 
-Failure policy (§7.7.7): LLM failure raises (nothing is written); email
-failure only flips email_status="failed" + email_error — the report and
-notification rows always survive.
+Failure policy (§7.7.7): LLM failure raises (nothing is written).
 
 Period semantics (recorded in progress.md):
   daily  — TODAY so far (Beijing) with yesterday-same-period ring compare,
@@ -21,24 +20,20 @@ Period semantics (recorded in progress.md):
            compared against the week before it; the Monday 09:00 cron
            therefore reports the week that just ended.
 
-Module access pattern: llm / email are referenced as module attributes
-(`llm.gen_text`, `email.send_email`) so check scripts can monkeypatch
-them without touching real SMTP.
+Module access pattern: llm is referenced as a module attribute
+(`llm.gen_text`) so check scripts can monkeypatch it.
 """
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 from datetime import date, datetime, timedelta, timezone
-
-import markdown as md
 
 from sqlalchemy import text
 
 from app.db import async_session_maker
 from app.models import Notification, Report
-from app.services import email, llm
+from app.services import llm
 
 logger = logging.getLogger("nail_demo.report")
 
@@ -245,38 +240,11 @@ def _build_title(report_type: str, start: date, end: date) -> str:
     return f"美甲品类周报 {start.isoformat()} ~ {end.isoformat()}"
 
 
-async def send_report_email(report_id: int, title: str, content_md: str) -> None:
-    """Background email task. Owns its own session; never raises."""
-    status, error, sent_at = "sent", None, datetime.now(timezone.utc)
-    try:
-        from app.config import settings
-
-        html = md.markdown(content_md, extensions=["tables", "fenced_code"])
-        await email.send_email(
-            to=settings.REPORT_RECIPIENT,
-            subject=title,
-            html_body=html,
-            text_body=content_md,
-        )
-    except Exception as e:  # email failure must never crash the app (§7.7.7)
-        status, error, sent_at = "failed", f"{type(e).__name__}: {e}", None
-        logger.warning("report %s email failed: %s", report_id, error)
-
-    async with async_session_maker() as db:
-        report = await db.get(Report, report_id)
-        if report is None:  # pragma: no cover — report deleted mid-flight
-            return
-        report.email_status = status
-        report.email_error = error
-        report.email_sent_at = sent_at
-        await db.commit()
-
-
 async def generate_and_dispatch_report(
     report_type: str, trigger_source: str = "scheduled"
 ) -> int:
-    """Aggregate -> LLM markdown -> reports + notifications rows -> async
-    email. Returns the new report id. Raises on LLM failure (no rows)."""
+    """Aggregate -> LLM markdown -> reports + notifications rows.
+    Returns the new report id. Raises on LLM failure (no rows)."""
     period_start, period_end = compute_period(report_type)
 
     async with async_session_maker() as db:
@@ -304,7 +272,6 @@ async def generate_and_dispatch_report(
             period_start=period_start,
             period_end=period_end,
             trigger_source=trigger_source,
-            email_status="pending",
         )
         db.add(report)
         await db.flush()
@@ -321,8 +288,6 @@ async def generate_and_dispatch_report(
         await db.commit()
         report_id = report.id
 
-    # Fire-and-forget so the caller (cron / HTTP / assistant) returns fast.
-    asyncio.create_task(send_report_email(report_id, title, content_md))
     logger.info(
         "report %s generated (%s, %s, %s~%s)",
         report_id, report_type, trigger_source, period_start, period_end,

@@ -1,7 +1,7 @@
 """In-process service health counters (Batch E: degradation visibility).
 
 Motivation: every AI/external call in this product degrades gracefully
-(template reasons, mock images, summary chat replies, failed-email flag)
+(template reasons, mock images, summary chat replies)
 — which once let a 100%-fallback regression hide for days. This module
 makes degradation LOUD: call sites record outcomes here, and
 GET /api/ops/health (surfaced in O7 账号工作台) shows them.
@@ -27,7 +27,7 @@ def _now_iso() -> str:
 
 def record_call(service: str, ok: bool, reason: str | None = None) -> None:
     """Count one outbound call outcome for a service key
-    (llm_quick / llm_strong / image_gen / email)."""
+    (llm_quick / llm_strong / image_gen / vlm_gate)."""
     entry = _services.setdefault(service, {
         "ok": 0, "fail": 0,
         "last_ok_at": None, "last_fail_at": None, "last_fail_reason": None,

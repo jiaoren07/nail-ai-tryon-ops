@@ -73,7 +73,7 @@ def _is_collected_for(tid: int) -> int:
 
 def upload() -> str:
     files = {"file": (SAMPLE_HAND.name, SAMPLE_HAND.read_bytes(), "image/png")}
-    data = {"user_id": UID}
+    data = {"user_id": UID, "is_sample": "1"}  # known hand: skip the Batch H VLM gate
     r = httpx.post(BASE + "/api/user/upload", files=files, data=data, headers=HEADERS, timeout=10.0)
     r.raise_for_status()
     body = r.json()

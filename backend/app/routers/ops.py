@@ -10,7 +10,6 @@ is shorthand for "B-end router".
 """
 from __future__ import annotations
 
-import asyncio
 import json
 from collections import Counter
 from datetime import date, datetime, timedelta, timezone
@@ -29,11 +28,7 @@ from app.models import Notification, OpsAction, Report, Style, StyleStats, Tryon
 from app.responses import ok
 from app.services import health_stats, llm
 from app.services.assistant_tools import TOOL_SCHEMAS, dispatch
-from app.services.report import (
-    ReportError,
-    generate_and_dispatch_report,
-    send_report_email,
-)
+from app.services.report import ReportError, generate_and_dispatch_report
 
 router = APIRouter(prefix="/api/ops")
 
@@ -697,9 +692,47 @@ class ChatMessage(BaseModel):
     content: str
 
 
+class ChatPrefs(BaseModel):
+    """Batch H: operator-tunable assistant behavior, set in O7「AI 助手
+    偏好」and sent with every chat request (stored per-browser, not in DB
+    — the public deployment resets its DB on every cold start anyway).
+    Server clamps everything: bad values degrade to defaults, never 400."""
+
+    model_tier: str = "strong"      # strong | quick
+    use_fc: bool = True             # False -> snapshot mode, no tool loop
+    temperature: float = 0.7
+
+
 class ChatBody(BaseModel):
     messages: list[ChatMessage]
     session_id: str | None = None
+    prefs: ChatPrefs | None = None
+
+
+_CHAT_SNAPSHOT_SYSTEM = (
+    "你是美甲品类运营工作台的 AI 助手（快照模式：Function Calling 已被运营者关闭）。\n"
+    "下面是系统刚查出的实时数据快照，回答必须仅基于它：快照里没有的信息如实说明"
+    "查不到，严禁编造数字。此模式下你无法执行运营动作（推荐位/下架等）——用户要求"
+    "执行时，说明需在「设置中心 → AI 助手偏好」开启 Function Calling，或到对应页面"
+    "手动操作。\n"
+    "数据快照：{snapshot}\n"
+    "用简体中文回复，简洁专业，不超过 150 字。"
+)
+
+# Snapshot mode's fixed query set (same defaults as the FC system prompt).
+_SNAPSHOT_QUERIES: list[tuple[str, dict]] = [
+    ("query_top_styles", {"date_range": "today", "top_n": 5}),
+    ("find_trending", {"growth_threshold": 0.5, "min_volume": 50}),
+    ("find_cold", {"days_no_activity": 7}),
+]
+
+
+def _clamped_prefs(prefs: ChatPrefs | None) -> tuple[str, bool, float]:
+    """Sanitize operator prefs — invalid values degrade to defaults."""
+    p = prefs or ChatPrefs()
+    tier = p.model_tier if p.model_tier in {"quick", "strong"} else "strong"
+    temperature = min(max(p.temperature, 0.0), 1.2)
+    return tier, bool(p.use_fc), temperature
 
 
 def _chat_fallback_reply(components: list[dict]) -> str:
@@ -758,8 +791,52 @@ async def ops_chat(body: ChatBody, db: AsyncSession = Depends(get_db)):
     if body.messages[-1].role != "user":
         raise HTTPException(400, "last_message_must_be_user")
 
+    tier, use_fc, temperature = _clamped_prefs(body.prefs)
     history = body.messages[-_CHAT_HISTORY_LIMIT:]
-    llm_messages: list[dict] = [
+
+    # ---- Snapshot mode (Batch H): FC disabled by the operator ----------
+    # One fixed data snapshot + one plain completion. No tool loop, no
+    # components, no action capability — the visible contrast IS the demo.
+    if not use_fc:
+        snapshot: dict = {}
+        for tool_name, args in _SNAPSHOT_QUERIES:
+            result = await dispatch(db, tool_name, args)
+            snapshot[tool_name] = (
+                result.get("items", [])[:8] if result.get("ok") else "查询失败"
+            )
+        llm_messages = [
+            {
+                "role": "system",
+                "content": _CHAT_SNAPSHOT_SYSTEM.format(
+                    snapshot=json.dumps(snapshot, ensure_ascii=False, default=str)
+                ),
+            },
+            *({"role": m.role, "content": m.content} for m in history),
+        ]
+        try:
+            msg = await llm.gen_text_with_tools(
+                llm_messages, tools=[], model=tier, temperature=temperature
+            )
+            reply = (msg.content or "").strip()
+        except (llm.LLMError, llm.ConfigError) as e:
+            health_stats.record_degradation("ops_chat", str(e))
+            reply = ""
+        if not reply:
+            reply = _chat_fallback_reply([
+                {"component": _COMPONENT_BY_TOOL[name], "data": snapshot[name]}
+                for name, _ in _SNAPSHOT_QUERIES
+                if isinstance(snapshot.get(name), list)
+            ])
+        return ok(data={
+            "reply": reply,
+            "components": [],
+            "session_id": body.session_id,
+            "tool_rounds": 0,
+            "mode": {"model_tier": tier, "use_fc": False, "temperature": temperature},
+        })
+
+    # ---- Function-Calling mode (default) -------------------------------
+    llm_messages = [
         {"role": "system", "content": _CHAT_SYSTEM_PROMPT},
         *({"role": m.role, "content": m.content} for m in history),
     ]
@@ -770,7 +847,9 @@ async def ops_chat(body: ChatBody, db: AsyncSession = Depends(get_db)):
 
     try:
         for _ in range(_CHAT_MAX_TOOL_ROUNDS):
-            msg = await llm.gen_text_with_tools(llm_messages, TOOL_SCHEMAS)
+            msg = await llm.gen_text_with_tools(
+                llm_messages, TOOL_SCHEMAS, model=tier, temperature=temperature
+            )
             if not msg.tool_calls:
                 reply = (msg.content or "").strip()
                 break
@@ -807,7 +886,9 @@ async def ops_chat(body: ChatBody, db: AsyncSession = Depends(get_db)):
         else:
             # Rounds exhausted while the model still wants tools: one last
             # text-only call so the reply reflects gathered data.
-            final = await llm.gen_text_with_tools(llm_messages, tools=[])
+            final = await llm.gen_text_with_tools(
+                llm_messages, tools=[], model=tier, temperature=temperature
+            )
             reply = (final.content or "").strip()
     except (llm.LLMError, llm.ConfigError) as e:
         health_stats.record_degradation("ops_chat", str(e))
@@ -821,6 +902,7 @@ async def ops_chat(body: ChatBody, db: AsyncSession = Depends(get_db)):
         "components": components,
         "session_id": body.session_id,
         "tool_rounds": tool_rounds,
+        "mode": {"model_tier": tier, "use_fc": True, "temperature": temperature},
     })
 
 
@@ -850,7 +932,6 @@ def _report_list_dict(r: Report) -> dict:
         "period_start": r.period_start.isoformat(),
         "period_end": r.period_end.isoformat(),
         "trigger_source": r.trigger_source,
-        "email_status": r.email_status,
         "generated_at": _iso_utc(r.generated_at),
     }
 
@@ -905,11 +986,7 @@ async def get_report(report_id: int, db: AsyncSession = Depends(get_db)):
     if report is None:
         raise HTTPException(404, "report_not_found")
     data = _report_list_dict(report)
-    data.update({
-        "content_md": report.content_md,
-        "email_sent_at": _iso_utc(report.email_sent_at),
-        "email_error": report.email_error,
-    })
+    data["content_md"] = report.content_md
     return ok(data=data)
 
 
@@ -940,24 +1017,6 @@ async def generate_report(body: GenerateReportBody):
 
     _last_generate_at[body.type] = monotonic()
     return ok(data={"report_id": report_id})
-
-
-@router.post("/reports/{report_id}/resend")
-async def resend_report(report_id: int, db: AsyncSession = Depends(get_db)):
-    """Re-fire the email for a FAILED report only (plan §9.3)."""
-    report = await db.get(Report, report_id)
-    if report is None:
-        raise HTTPException(404, "report_not_found")
-    if report.email_status != "failed":
-        raise HTTPException(400, "resend_only_failed")
-
-    report.email_status = "pending"
-    report.email_error = None
-    title, content_md = report.title, report.content_md
-    await db.commit()
-
-    asyncio.create_task(send_report_email(report_id, title, content_md))
-    return ok(data={"report_id": report_id, "email_status": "pending"})
 
 
 @router.get("/notifications")

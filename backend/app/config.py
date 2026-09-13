@@ -23,13 +23,12 @@ class Settings(BaseSettings):
     # the quick tier.
     LLM_QUICK_MODEL: str = "qwen/qwen3-235b-a22b-instruct-2507"
     LLM_STRONG_MODEL: str = "deepseek/deepseek-v4-pro"
-
-    SMTP_HOST: str = ""
-    SMTP_PORT: int = 465
-    SMTP_USER: str = ""
-    SMTP_PASS: str = ""
-    SMTP_FROM: str = ""
-    REPORT_RECIPIENT: str = ""
+    # Batch H: VLM used as the U1 upload gate ("is this a hand photo?").
+    # 2026-09-13: the 30B-MoE VL model data-prep used got delisted by PPIO
+    # (found via a loud hand_gate fail-open on first verify); 235b-a22b
+    # instruct is the current non-thinking VL sibling of the quick tier —
+    # measured 0.6-3.1s per yes/no. Gate fails OPEN on model errors.
+    VLM_MODEL: str = "qwen/qwen3-vl-235b-a22b-instruct"
 
     SCHEDULER_ENABLED: bool = True
 

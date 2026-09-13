@@ -1,11 +1,10 @@
-import { ArrowLeftOutlined, MailOutlined, ReloadOutlined } from "@ant-design/icons";
-import { Alert, App as AntApp, Button, Card, Skeleton, Tag } from "antd";
+import { ArrowLeftOutlined } from "@ant-design/icons";
+import { Alert, Button, Card, Skeleton, Tag } from "antd";
 import dayjs from "dayjs";
 import { useCallback, useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import { useNavigate, useParams } from "react-router-dom";
 import api from "../../api/client";
-import { EMAIL_STATUS_TAG } from "./reportStatus";
 
 interface ReportDetail {
   id: number;
@@ -14,11 +13,8 @@ interface ReportDetail {
   period_start: string;
   period_end: string;
   trigger_source: string;
-  email_status: "pending" | "sent" | "failed";
   generated_at: string | null;
   content_md: string;
-  email_sent_at: string | null;
-  email_error: string | null;
 }
 
 interface ApiEnvelope<T> {
@@ -30,11 +26,9 @@ interface ApiEnvelope<T> {
 export default function RDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { message } = AntApp.useApp();
   const [detail, setDetail] = useState<ReportDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [resending, setResending] = useState(false);
   const [reloadToken, setReloadToken] = useState(0);
 
   useEffect(() => {
@@ -74,30 +68,6 @@ export default function RDetail() {
     setLoading(true);
     setReloadToken((k) => k + 1);
   }, []);
-
-  const resend = useCallback(async () => {
-    setResending(true);
-    try {
-      const response = await api.post<ApiEnvelope<{ email_status: string }>>(
-        `/api/ops/reports/${id}/resend`,
-        undefined,
-        { suppressToast: true },
-      );
-      if (response.data.code !== 0) {
-        throw new Error(response.data.msg || "resend_error");
-      }
-      message.success("已重新触发发送，几秒后刷新查看结果");
-      refetch();
-    } catch (requestError) {
-      const msg =
-        requestError instanceof Error ? requestError.message : "resend_request_failed";
-      message.error(`重发失败：${msg}`);
-    } finally {
-      setResending(false);
-    }
-  }, [id, message, refetch]);
-
-  const statusMeta = detail ? EMAIL_STATUS_TAG[detail.email_status] : null;
 
   return (
     <section className="mx-auto max-w-[1100px]">
@@ -169,55 +139,7 @@ export default function RDetail() {
                       : "-"}
                   </dd>
                 </div>
-                <div className="flex items-center justify-between">
-                  <dt className="text-ink-muted">邮件状态</dt>
-                  <dd className="flex items-center gap-1.5">
-                    {statusMeta && (
-                      <Tag variant="filled" color={statusMeta.color} className="mr-0">
-                        {statusMeta.label}
-                      </Tag>
-                    )}
-                    <Button
-                      size="small"
-                      type="text"
-                      icon={<ReloadOutlined />}
-                      onClick={refetch}
-                      aria-label="刷新状态"
-                    />
-                  </dd>
-                </div>
-                {detail.email_sent_at && (
-                  <div className="flex justify-between">
-                    <dt className="text-ink-muted">发送时间</dt>
-                    <dd className="text-ink">
-                      {dayjs(detail.email_sent_at).format("MM-DD HH:mm:ss")}
-                    </dd>
-                  </div>
-                )}
               </dl>
-
-              {detail.email_status === "failed" && (
-                <div className="mt-4">
-                  <Alert
-                    type="error"
-                    showIcon
-                    message="邮件发送失败"
-                    description={
-                      <span className="break-all text-xs">{detail.email_error}</span>
-                    }
-                  />
-                  <Button
-                    block
-                    danger
-                    className="mt-3"
-                    icon={<MailOutlined />}
-                    loading={resending}
-                    onClick={() => void resend()}
-                  >
-                    重新发送
-                  </Button>
-                </div>
-              )}
             </Card>
           </div>
         )

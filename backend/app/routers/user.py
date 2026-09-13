@@ -42,7 +42,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db import async_session_maker, get_db
 from app.models import Style, StyleStats, Tryon
 from app.responses import ok
-from app.services import health_stats, llm
+from app.services import hand_gate, health_stats, llm
 from app.services.image_gen import ImageGenError, get_image_provider
 from app.services.recommend import recommend
 
@@ -94,8 +94,13 @@ async def upload_hand(
     request: Request,
     file: UploadFile = File(...),
     user_id: str = Form(...),
+    is_sample: str = Form("0"),
 ):
-    """Plan §4.2: accept a hand photo, save to static/uploads/, return mock skin_tone."""
+    """Plan §4.2: accept a hand photo, save to static/uploads/, return mock skin_tone.
+
+    Batch H adds a VLM hand-photo gate for user uploads (is_sample!="1"):
+    non-hand images get 422 not_a_hand_photo; a gate outage fails open.
+    """
     header_uid = request.headers["X-User-Id"]  # guaranteed by Step 4.1 middleware
     if user_id != header_uid:
         raise HTTPException(400, "user_id_mismatch")
@@ -108,6 +113,9 @@ async def upload_hand(
     content = await file.read()
     if len(content) > MAX_UPLOAD_BYTES:
         raise HTTPException(413, "file_too_large")
+
+    if is_sample != "1" and await hand_gate.is_hand_photo(content) is False:
+        raise HTTPException(422, "not_a_hand_photo")
 
     try:
         hand_features = _analyze_hand(content)

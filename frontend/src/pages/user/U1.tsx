@@ -37,10 +37,12 @@ export default function U1() {
     if (msg === "file_too_large") return "文件超大";
     if (msg === "unsupported_format") return "格式不支持";
     if (msg === "user_id_mismatch") return "身份校验失败，请刷新页面";
+    if (msg === "not_a_hand_photo")
+      return "未识别到手部：请上传一张清晰的手部照片（手掌或手背朝上效果最好）";
     return "网络异常，请重试";
   }
 
-  async function handleFile(file: File) {
+  async function handleFile(file: File, isSample = false) {
     // 1. Type guard. Plan: jpg/png only.
     if (!["image/jpeg", "image/png"].includes(file.type)) {
       message.error("格式不支持，仅支持 JPG / PNG");
@@ -70,6 +72,9 @@ export default function U1() {
       const fd = new FormData();
       fd.append("file", compressed, file.name || "hand.png");
       fd.append("user_id", userId);
+      // Batch H: samples are known hands — skip the backend VLM gate so
+      // the 1s sample fast-path stays fast. User uploads get checked.
+      fd.append("is_sample", isSample ? "1" : "0");
       const r = await api.post("/api/user/upload", fd, { suppressToast: true });
       if (r.data?.code !== 0) {
         message.error(friendlyError(r.data?.msg));
@@ -95,7 +100,7 @@ export default function U1() {
       const blob = await resp.blob();
       const filename = url.split("/").pop() ?? "sample.png";
       const file = new File([blob], filename, { type: blob.type || "image/png" });
-      await handleFile(file);
+      await handleFile(file, true);
     } catch {
       message.error("示例图加载失败，请检查后端");
     }
@@ -153,10 +158,10 @@ export default function U1() {
               <InboxOutlined style={{ color: "#FFD100", fontSize: 56 }} />
             </p>
             <p className="ant-upload-text" style={{ fontSize: 16, color: "#111111" }}>
-              {uploading ? "AI 正在分析你的手部特征..." : "拖拽手图到此处，或点击选择"}
+              {uploading ? "AI 正在识别手部并分析特征..." : "拖拽手图到此处，或点击选择"}
             </p>
             <p className="ant-upload-hint" style={{ color: "#8A8A8A" }}>
-              支持 JPG / PNG，≤10MB；上传前自动压缩，不会保存你的隐私
+              支持 JPG / PNG，≤10MB；AI 会先确认是手部照片，非手部图片将提示重新上传
             </p>
           </Upload.Dragger>
         </div>

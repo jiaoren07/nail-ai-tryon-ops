@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import api from "../../api/client";
 import EChart from "../../components/EChart";
+import { loadAiPrefs, toChatPrefs } from "./aiPrefs";
 
 /**
  * O5 chat panel (design-docu §7.5 / plan §8.3). Used twice:
@@ -222,6 +223,9 @@ export default function ChatPanel() {
   const [messages, setMessages] = useState<ChatMsg[]>([]);
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
+  // Mount-time snapshot for the welcome-card badges; the actual request
+  // re-reads localStorage on every send so O7 changes apply immediately.
+  const [prefsView] = useState(() => loadAiPrefs());
   const scrollRef = useRef<HTMLDivElement>(null);
   // Lazily minted on first send — render must stay pure (react-hooks/purity).
   const sessionIdRef = useRef<string | null>(null);
@@ -247,6 +251,8 @@ export default function ChatPanel() {
           {
             messages: nextMessages.map((m) => ({ role: m.role, content: m.content })),
             session_id: sessionIdRef.current,
+            // Batch H: O7-configured prefs, re-read from localStorage per send
+            prefs: toChatPrefs(loadAiPrefs()),
           },
           { suppressToast: true, timeout: 120_000 },
         );
@@ -274,10 +280,18 @@ export default function ChatPanel() {
       <div ref={scrollRef} className="min-h-0 flex-1 space-y-4 overflow-y-auto pr-1">
         {messages.length === 0 && (
           <div className="rounded-xl border border-line bg-surface px-4 py-4">
-            <div className="text-sm font-semibold text-ink">你好，我是运营 AI 助手</div>
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-semibold text-ink">你好，我是运营 AI 助手</span>
+              <Tag variant="filled" color={prefsView.useFc ? "purple" : "default"} className="mr-0">
+                {prefsView.useFc ? "Function Calling" : "快照模式"}
+              </Tag>
+              <Tag variant="filled" className="mr-0">
+                {prefsView.modelTier === "quick" ? "轻量档" : "强推理档"}
+              </Tag>
+            </div>
             <p className="mt-1 text-xs leading-5 text-ink-secondary">
               可以用自然语言查询试戴数据、发现爆款与冷门，或直接让我执行推荐位调整、下架等动作
-              （动作即时生效并写入审计）。
+              （动作即时生效并写入审计）。模式与模型可在「设置中心 → AI 助手偏好」调整。
             </p>
             <div className="mt-3 flex flex-wrap gap-2">
               {SUGGESTIONS.map((s) => (
