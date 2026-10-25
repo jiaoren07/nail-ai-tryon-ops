@@ -43,8 +43,8 @@ Also in the repo:
 ## Commands
 
 **Product app** (see README 快速启动 for the full first-run sequence):
-- Seed / reset demo data: `cd backend; .venv\Scripts\python.exe -X utf8 scripts\seed_all.py` (idempotent; rerun before demos and before any `_check_*_api.py`)
-- Backend: `cd backend; .venv\Scripts\python.exe -m uvicorn app.main:app --port 8000`
+- Seed / reset demo data: `cd backend && .venv/bin/python scripts/seed_all.py` (Windows: `.venv\Scripts\python.exe -X utf8 scripts\seed_all.py`; idempotent; rerun before demos and before any `_check_*_api.py`)
+- Backend: `cd backend && .venv/bin/python -m uvicorn app.main:app --port 8000` (Windows: `.venv\Scripts\python.exe -m uvicorn ...`)
 - Frontend dev: `cd frontend; npm run dev` → http://localhost:5173 (`npm run build` then backend-only :8000 = single-port deployment mode; `npm run lint`, `npx tsc -b` for checks)
 - Verification scripts: `backend/scripts/_check_*.py` — underscore-prefixed on purpose (not pytest targets), each prints `ALL PASS`
 
@@ -78,4 +78,5 @@ Read this so you don't have to reverse-engineer it from the planning docs:
 - **Focus on product and engineering, not presentation framing.** Per user preference recorded in personal memory (`feedback-focus-on-product`): avoid sections / phrasing oriented around "答辩 / 评审 / PPT / 评委 / 加分 / 演示话术". Business value, competitive analysis, and innovation points belong in product docs as substance, not as pitch material. This rule applies to any new docs you write here.
 - **No code in `implementation-plan.md`.** That file is for instructions to AI developers; it deliberately contains zero code. Don't "improve" it by adding snippets.
 - **Mock dataset is desensitized contest data.** `dataset/styles/*_enh.png` already shows nails on a hand model. Don't treat them as bare design swatches.
-- **Windows + Chinese paths.** Native commands run via this harness sometimes get wrapped stderr noise but still succeed; check `Test-Path` / file size, not exit code, when in doubt. Always emit `.env`-style files without BOM (PowerShell's default `Out-File -Encoding utf8` writes BOM — use `[System.IO.File]::WriteAllText` with `UTF8Encoding(false)` instead).
+- **Platform.** Development moved from Windows to macOS in 2026-10 (macOS checkout: `~/code/nail-ai-tryon-ops`). Use the macOS forms there: `.venv/bin/python`, plain zsh, no `-X utf8` needed. The README quick-start lists both platforms.
+- **Windows only (historical).** Chinese path `D:\github仓库1`: native commands via this harness sometimes get wrapped stderr noise but still succeed — check `Test-Path` / file size, not exit code. Emit `.env`-style files without BOM (PowerShell's default `Out-File -Encoding utf8` writes BOM — use `[System.IO.File]::WriteAllText` with `UTF8Encoding(false)`).

@@ -52,12 +52,16 @@ These override any general "auto-continue" behavior your default settings might 
 
 ## 4. Environment quirks
 
-- **Windows + PowerShell.** Bash-style `&&` is a PS parse error. Use `; if ($?) { ... }` or `;` for unconditional chain. Multiline strings via here-strings `@'...'@` (single-quoted; `'@` must be at column 0).
-- **CJK paths** (`d:\github仓库1\`). Set `$env:PYTHONIOENCODING="utf-8"` before running verify scripts, else Chinese in output turns into mojibake.
-- **Git commit messages with Chinese.** Inline `git commit -m "..."` triggers PowerShell quote-escape hell. Convention: `Write` a `_COMMIT_MSG.tmp` at repo root, `git commit -F _COMMIT_MSG.tmp`, then delete.
-- **Backend port 8000 (uvicorn), frontend port 5173 (vite).** Both must be running for full-flow verification. No proxy — CORS is configured for cross-origin dev. `localhost:8000` in browser will 404 (backend has no `/` route); use `localhost:5173` for the app.
+**Platform (2026-10): development moved from Windows to macOS.** The repo is cross-platform; venv paths differ (`.venv/bin/python` on macOS vs `.venv\Scripts\python.exe` on Windows). On macOS the local checkout lives at `~/code/nail-ai-tryon-ops`, and plain zsh conventions apply — the Windows-only workarounds below are NOT needed there.
+
+Cross-platform:
+- **Backend port 8000 (uvicorn), frontend port 5173 (vite).** Both must be running for full-flow dev verification (CORS is configured for cross-origin dev). Or single-port mode: `npm run build` once, then the backend alone serves the whole app at `localhost:8000`.
 - **Vite dev server binds IPv6 by default.** `curl 127.0.0.1:5173` may fail; use `curl localhost:5173`.
-- **`_COMMIT_MSG.tmp` should be in `.gitignore`? Not currently.** Just remember to delete it after commit. If Codex forgets, it'll show up in `git status`.
+
+Windows-only (historical — the machine this was built on):
+- **PowerShell 5.1.** Bash-style `&&` is a parse error; use `; if ($?) { ... }`. Multiline strings via here-strings `@'...'@` (`'@` at column 0).
+- **CJK path** (`D:\github仓库1\`). Set `$env:PYTHONIOENCODING="utf-8"` and run Python with `-X utf8`, else Chinese output mojibakes.
+- **Git commit messages with Chinese.** Inline `-m` hits PowerShell quote-escape hell; write `_COMMIT_MSG.tmp`, `git commit -F _COMMIT_MSG.tmp`, then delete it. (On macOS a normal heredoc / `-m` works.)
 
 ## 5. Documentation deliverables per step (mandatory)
 

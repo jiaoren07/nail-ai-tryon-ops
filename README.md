@@ -93,20 +93,36 @@ React 18 + Vite + TypeScript + antd + Tailwind + ECharts ｜ FastAPI + SQLAlchem
 
 ## 快速启动
 
-```
-# 0. 配置（首次）：backend/ 下复制 .env.example 为 .env，填入 PPIO_API_KEY
-#    （IMAGE_PROVIDER=mock 为默认安全网，改 seedream 得到真实 AI 合成）
+需要 Python 3.11+、Node 20+。首次配置：`backend/` 下复制 `.env.example` 为 `.env`，填入 `PPIO_API_KEY`（`IMAGE_PROVIDER=mock` 为默认安全网，改 `seedream` 得到真实 AI 合成）。
 
-# 1. 初始化数据（演示图片随仓库自带，无需额外下载；可重复执行，隔天演示前请重跑以刷新时间窗口）
+**macOS / Linux**
+
+```
+# 1. 初始化数据（演示图片随仓库自带；可重复执行，隔天演示前请重跑以刷新时间窗口）
 cd backend
-python -m venv .venv && .venv\Scripts\pip install -r requirements.txt   # 首次
+python3 -m venv .venv && .venv/bin/pip install -r requirements.txt   # 首次
+.venv/bin/python scripts/seed_all.py
+
+# 2. 后端（8000）
+.venv/bin/python -m uvicorn app.main:app --port 8000
+
+# 3. 前端（5173，另开一个终端）
+cd frontend && npm install && npm run dev
+```
+
+**Windows（PowerShell）**
+
+```
+# 1. 初始化数据
+cd backend
+python -m venv .venv; .venv\Scripts\pip install -r requirements.txt   # 首次
 .venv\Scripts\python.exe -X utf8 scripts\seed_all.py
 
 # 2. 后端（8000）
 .venv\Scripts\python.exe -m uvicorn app.main:app --port 8000
 
-# 3. 前端（5173）
-cd ../frontend && npm install && npm run dev
+# 3. 前端（5173，另开一个终端）
+cd frontend; npm install; npm run dev
 ```
 
 打开 `http://localhost:5173`：`/` 为双端入口。AI 助手连续提问建议间隔 30 秒（API 限速，超限自动降级为数据摘要回复）。
